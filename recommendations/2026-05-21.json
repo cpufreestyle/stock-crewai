@@ -1,0 +1,31 @@
+{
+  "date": "2026-05-21",
+  "datetime": "2026-05-21T15:00:06.065649",
+  "market_status": "火热",
+  "recommended_position": "牛市",
+  "notes": "推荐3只股票",
+  "stocks": [
+    {
+      "code": "300750",
+      "name": "宁德时代",
+      "target": null,
+      "stop": null,
+      "reason": "1. **代码和名称**: 300750 宁德时代"
+    },
+    {
+      "code": "603259",
+      "name": "药明康德",
+      "target": null,
+      "stop": null,
+      "reason": "1. **代码和名称**: 603259 药明康德"
+    },
+    {
+      "code": "601888",
+      "name": "中国中免",
+      "target": null,
+      "stop": null,
+      "reason": "1. **代码和名称**: 601888 中国中免"
+    }
+  ],
+  "tracked": false
+}
