@@ -79,3 +79,11 @@ NET_VALUE_HISTORY_FILE = "net_value_history.json"
 import os
 API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or ""
 API_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+
+# ========================
+# 风控熔断
+# ========================
+CIRCUIT_BREAKER_DAILY_LOSS_PCT = 3.0    # 单日亏损超此百分比触发熔断
+CIRCUIT_BREAKER_CONSECUTIVE_STOPS = 3   # 连续止损次数触发熔断
+CIRCUIT_BREAKER_COOLDOWN_MINUTES = 60  # 熔断后冷却时间（分钟）
+CIRCUIT_BREAKER_FILE = "circuit_breaker.json"

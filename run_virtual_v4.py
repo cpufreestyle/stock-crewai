@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 import portfolio_tracker as pt
+from circuit_breaker import circuit_breaker
 import risk_manager as rm
 import data_fetcher as df
 import logging
@@ -565,6 +566,12 @@ def run_once():
     cash = portfolio.get("cash", 100000)
     total_capital = portfolio.get("total_capital", 100000)
     
+    # 风控熔断检查
+    cb_status = circuit_breaker.get_status()
+    if cb_status["tripped"]:
+        print(f"⚠️ 风控熔断中: {cb_status['reason']}，剩余冷却 {cb_status['remaining_minutes']}分钟")
+        print("  本次跳过交易，仅刷新行情\n")
+    
     # 市场状态
     market_regime = df.get_simple_market_regime()
     print(f"[市场] {market_regime}\n")
@@ -593,6 +600,10 @@ def run_once():
             for s in sells:
                 icon = "📉" if s["pnl"] < 0 else "📈"
                 print(f"  {icon} {s['name']}: {s['shares']}股 @ {s['price']:.2f}元 ({s['pnl']:+.2f}元)")
+                # 记录到熔断器
+                pnl_pct_val = s.get("pnl_pct", 0)
+                pf = pt.load_portfolio()
+                circuit_breaker.record_trade(pnl_pct_val, pf.get("total_value", 100000))
     else:
         print("  无风险信号\n")
     
@@ -601,9 +612,11 @@ def run_once():
     positions = portfolio.get("positions", {})
     cash = portfolio.get("cash", 100000)
     
-    # 筛选买入候选
+    # 筛选买入候选（熔断时跳过）
     print("\n=== 筛选买入候选 ===")
-    candidates = advanced_filter(realtime_data, positions, cash, total_capital)
+    candidates = []
+    if not cb_status["tripped"]:
+        candidates = advanced_filter(realtime_data, positions, cash, total_capital)
     
     if candidates:
         print(f"候选 {len(candidates)} 只，选取前 3 只:")

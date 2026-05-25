@@ -21,8 +21,9 @@ for _k in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy'
     os.environ.pop(_k, None)
 
 # 强制 requests 绕过系统代理（Clash PAC 会让国内站点也走代理，导致 SSL 错误）
-import requests as _req
-_orig_merge = _req.Session.merge_environment_settings
+import requests
+from retry_utils import api_retry
+_orig_merge = requests.Session.merge_environment_settings
 
 def _patched_merge(self, url, proxies, stream, verify, cert):
     # 始终忽略系统代理，直接连接
@@ -30,7 +31,7 @@ def _patched_merge(self, url, proxies, stream, verify, cert):
     settings['proxies'] = {}
     return settings
 
-_req.Session.merge_environment_settings = _patched_merge
+requests.Session.merge_environment_settings = _patched_merge
 
 import akshare as ak
 import pandas as pd
@@ -436,6 +437,7 @@ def calculate_technical(df: pd.DataFrame) -> Dict:
 
 
 @cached(ttl=10, cache_instance=realtime_cache)
+@api_retry
 def get_realtime_quotes(stock_codes: List[str]) -> List[Dict]:
     """获取实时行情（新浪接口）
     
@@ -526,6 +528,7 @@ def get_realtime_quotes(stock_codes: List[str]) -> List[Dict]:
 
 
 @cached(ttl=10, cache_instance=realtime_cache)
+@api_retry
 def get_sina_realtime(codes: List[str]) -> Dict[str, Dict]:
     """获取实时行情（兼容 run_virtual_v4.py 格式）
     
@@ -553,6 +556,7 @@ def get_sina_realtime(codes: List[str]) -> Dict[str, Dict]:
 
 
 @cached(ttl=300, cache_instance=market_cache)
+@api_retry
 def get_simple_market_regime() -> str:
     """简单市场状态判断（兼容 run_virtual_v4.py 格式）
     
