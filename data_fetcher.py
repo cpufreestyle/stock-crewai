@@ -5,6 +5,17 @@
 东方财富 push2 域名不稳定（push2his 已废弃，push2 间歇性 502）
 """
 import os
+
+from api_cache import (
+    TTLCache,
+    cached,
+    realtime_cache,
+    market_cache,
+    kline_cache,
+    clear_all_caches,
+    get_all_cache_stats
+)
+
 # 清除代理设置，国内财经网站直连即可
 for _k in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'):
     os.environ.pop(_k, None)
@@ -230,6 +241,7 @@ def get_market_heat() -> Dict:
         }
 
 
+@cached(ttl=300, cache_instance=market_cache)
 def get_market_regime(index_code: str = "000001", days: int = 120) -> Dict:
     """
     判断市场状态（牛熊市）
@@ -423,6 +435,7 @@ def calculate_technical(df: pd.DataFrame) -> Dict:
     }
 
 
+@cached(ttl=10, cache_instance=realtime_cache)
 def get_realtime_quotes(stock_codes: List[str]) -> List[Dict]:
     """获取实时行情（新浪接口）
     
@@ -512,6 +525,7 @@ def get_realtime_quotes(stock_codes: List[str]) -> List[Dict]:
         return []
 
 
+@cached(ttl=10, cache_instance=realtime_cache)
 def get_sina_realtime(codes: List[str]) -> Dict[str, Dict]:
     """获取实时行情（兼容 run_virtual_v4.py 格式）
     
@@ -538,6 +552,7 @@ def get_sina_realtime(codes: List[str]) -> Dict[str, Dict]:
     return result
 
 
+@cached(ttl=300, cache_instance=market_cache)
 def get_simple_market_regime() -> str:
     """简单市场状态判断（兼容 run_virtual_v4.py 格式）
     
