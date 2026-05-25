@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 from safe_io import safe_load_json, safe_save_json, safe_update_json
 from config import PORTFOLIO_FILE
+from db import load_portfolio_db, save_portfolio_db, save_trade, load_trades as load_trades_db
 HISTORY_DIR = os.path.join(os.path.dirname(__file__), "history")
 
 
@@ -15,23 +16,29 @@ def ensure_dirs():
 
 def load_portfolio() -> Dict:
     """加载当前持仓"""
-    return safe_load_json(
-        PORTFOLIO_FILE,
-        default={
-            "positions": {},
-            "cash": 100000,
-            "total_capital": 100000,
-            "created": datetime.now().isoformat(),
-            "total_value": 100000,
-            "total_return_pct": 0.0,
-        },
-    )
+    try:
+        return load_portfolio_db()
+    except Exception:
+        return safe_load_json(
+            PORTFOLIO_FILE,
+            default={
+                "positions": {},
+                "cash": 100000,
+                "total_capital": 100000,
+                "created": datetime.now().isoformat(),
+                "total_value": 100000,
+                "total_return_pct": 0.0,
+            },
+        )
 
 
 def save_portfolio(portfolio: Dict):
     """保存持仓"""
     ensure_dirs()
-    safe_save_json(PORTFOLIO_FILE, portfolio)
+    try:
+        save_portfolio_db(portfolio)
+    except Exception:
+        safe_save_json(PORTFOLIO_FILE, portfolio)
 
 
 def update_position(
@@ -247,11 +254,12 @@ def save_daily_report(report_text: str):
 
 def get_trade_history(month: str = None) -> List[Dict]:
     """获取交易历史"""
-    if month is None:
-        month = datetime.now().strftime("%Y%m")
-
-    trade_log = os.path.join(HISTORY_DIR, f"trades_{month}.json")
-    if os.path.exists(trade_log):
+    try:
+        return load_trades_db(month=month)
+    except Exception:
+        if month is None:
+            month = datetime.now().strftime("%Y%m")
+        trade_log = os.path.join(HISTORY_DIR, f"trades_{month}.json")
         return safe_load_json(trade_log, default=[])
 
 
