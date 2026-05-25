@@ -29,6 +29,7 @@ from pathlib import Path
 
 import portfolio_tracker as pt
 from circuit_breaker import circuit_breaker
+from signal_dedup import signal_dedup
 import risk_manager as rm
 import data_fetcher as df
 import logging
@@ -570,6 +571,7 @@ def run_once():
     cb_status = circuit_breaker.get_status()
     if cb_status["tripped"]:
         print(f"⚠️ 风控熔断中: {cb_status['reason']}，剩余冷却 {cb_status['remaining_minutes']}分钟")
+        alert_circuit_breaker(cb_status['reason'], cb_status['remaining_minutes'] or 0)
         print("  本次跳过交易，仅刷新行情\n")
     
     # 市场状态
@@ -590,9 +592,14 @@ def run_once():
     
     if alerts:
         print(f"发现 {len(alerts)} 个风险信号:")
-        for alert in alerts:
-            icon = "🚨" if alert["action"] == "STOP_LOSS" else ("💰" if alert["action"] == "TAKE_PROFIT" else "⚠️")
-            print(f"  {icon} {alert['name']}: {alert['reason']}")
+        for alert_item in alerts:
+            icon = "🚨" if alert_item["action"] == "STOP_LOSS" else ("💰" if alert_item["action"] == "TAKE_PROFIT" else "⚠️")
+            print(f"  {icon} {alert_item['name']}: {alert_item['reason']}")
+            # 发送告警通知
+            if alert_item["action"] == "STOP_LOSS":
+                alert_stop_loss(alert_item.get("code",""), alert_item["name"], alert_item["current_price"], 0, alert_item.get("pnl_pct",0))
+            elif alert_item["action"] == "TAKE_PROFIT":
+                alert_take_profit(alert_item.get("code",""), alert_item["name"], alert_item["current_price"], 0, alert_item.get("pnl_pct",0))
         
         sells = execute_sell(positions, alerts, realtime_data)
         if sells:
@@ -623,8 +630,13 @@ def run_once():
         for i, cand in enumerate(candidates[:3], 1):
             print(f"  {i}. {cand['name']}: {cand['price']:.2f}元 (+{cand['change_pct']:.2f}%) 评分{cand['tech_score']}")
         
-        print("\n=== 执行买入 ===")
-        buys = execute_buy(candidates, positions, cash, total_capital, realtime_data)
+        # 去重过滤：冷却期内不重复买入同一股票
+        candidates = signal_dedup.filter_duplicate(candidates, code_key="code")
+        if not candidates:
+            print("  所有候选股票均在冷却期内，跳过买入\n")
+        else:
+            print("\n=== 执行买入 ===")
+            buys = execute_buy(candidates, positions, cash, total_capital, realtime_data)
         
         if buys:
             print(f"已买入 {len(buys)} 只股票:")
