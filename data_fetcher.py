@@ -1,10 +1,33 @@
 """
-数据获取模块 - 基于 akshare
+数据获取模块 - 新浪财经源（稳定直连）+ 东方财富降级
+
+新浪源 stock_zh_a_daily 直连稳定，不受代理影响
+东方财富 push2 域名不稳定（push2his 已废弃，push2 间歇性 502）
 """
+import os
+# 清除代理设置，国内财经网站直连即可
+for _k in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'):
+    os.environ.pop(_k, None)
+
+# 强制 requests 绕过系统代理（Clash PAC 会让国内站点也走代理，导致 SSL 错误）
+import requests as _req
+_orig_merge = _req.Session.merge_environment_settings
+
+def _patched_merge(self, url, proxies, stream, verify, cert):
+    # 始终忽略系统代理，直接连接
+    settings = _orig_merge(self, url, {}, stream, verify, cert)
+    settings['proxies'] = {}
+    return settings
+
+_req.Session.merge_environment_settings = _patched_merge
+
 import akshare as ak
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
+import time as _time
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # A股候选股票池（沪深300代表性股票，MVP用固定池更稳定）
@@ -67,69 +90,89 @@ def get_index_components(symbol: str = "000300") -> pd.DataFrame:
 
 def get_stock_price(stock_code: str, period: str = "daily",
                     start_date: str = None, end_date: str = None) -> pd.DataFrame:
-    """获取股票行情（带自动重试，多数据源切换）"""
+    """获取股票行情（新浪财经优先，东方财富降级）"""
     import time as _time
-    
-    # 构建腾讯代码格式
-    if stock_code.startswith(('6', '9')):
-        tx_code = f"sh{stock_code}"
+
+    # 日期格式
+    if end_date is None:
+        em_end = datetime.now().strftime("%Y%m%d")
     else:
-        tx_code = f"sz{stock_code}"
-    
-    # 优先尝试腾讯源（更稳定）
-    for attempt in range(3):
-        try:
-            df = ak.stock_zh_a_hist_tx(symbol=tx_code, adjust="qfq")
-            if df.empty:
-                raise Exception("空数据")
-            
-            # 统一列名
-            df = df.rename(columns={
-                "date": "日期",
-                "open": "开盘",
-                "close": "收盘",
-                "high": "最高",
-                "low": "最低",
-                "amount": "成交量"
-            })
-            
-            # 过滤日期范围
-            if start_date:
-                df = df[df["日期"] >= start_date]
-            if end_date:
-                df = df[df["日期"] <= end_date]
-            else:
-                # 默认最近90天
-                cutoff = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
-                df = df[df["日期"] >= cutoff]
-            
-            df = df.reset_index(drop=True)
-            return df
-        except Exception as e:
-            if attempt < 2:
-                wait = (attempt + 1) * 5
-                print(f"[数据] {stock_code}(腾讯) 第{attempt+1}次失败，{wait}s后重试")
-                _time.sleep(wait)
-            else:
-                pass  # 尝试备用源
-    
-    # 备用：东方财富源
+        em_end = end_date.replace("-", "")
+    if start_date is None:
+        em_start = (datetime.now() - timedelta(days=120)).strftime("%Y%m%d")
+    else:
+        em_start = start_date.replace("-", "")
+
+    # --- 数据源1: AkShare 新浪财经源（稳定直连，不受代理影响） ---
+    period_map = {"daily": "daily", "weekly": "weekly", "monthly": "monthly"}
+    # 新浪源需要 sz/sh 前缀
+    if stock_code.startswith(('6', '9')):
+        sina_code = f"sh{stock_code}"
+    else:
+        sina_code = f"sz{stock_code}"
     for attempt in range(2):
         try:
-            if end_date is None:
-                end_date = datetime.now().strftime("%Y%m%d")
-            if start_date is None:
-                start_date = (datetime.now() - timedelta(days=90)).strftime("%Y%m%d")
-
-            df = ak.stock_zh_a_hist(symbol=stock_code, period=period,
-                                     start_date=start_date, end_date=end_date, adjust="qfq")
-            return df
+            df = ak.stock_zh_a_daily(symbol=sina_code, start_date=em_start, end_date=em_end, adjust="qfq")
+            if df is not None and not df.empty:
+                df = df.rename(columns={
+                    "date": "日期", "open": "开盘", "close": "收盘",
+                    "high": "最高", "low": "最低", "volume": "成交量", "amount": "成交额"
+                })
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
+                df = df.sort_values("日期").reset_index(drop=True)
+                print(f"[数据] {stock_code} 新浪获取{len(df)}条")
+                return df
         except Exception as e:
+            print(f"[数据] {stock_code} 新浪 attempt={attempt} 失败: {e}")
             if attempt < 1:
-                _time.sleep(5)
-            else:
-                print(f"[数据] 获取行情失败 {stock_code}: {e}")
-                return pd.DataFrame()
+                _time.sleep(2)
+
+    # --- 数据源2: AkShare 东方财富源（降级备用） ---
+    for attempt in range(2):
+        try:
+            df = ak.stock_zh_a_hist(symbol=stock_code, period=period,
+                                     start_date=em_start, end_date=em_end, adjust="qfq")
+            if df is not None and not df.empty:
+                df = df.rename(columns={
+                    "日期": "日期", "开盘": "开盘", "收盘": "收盘",
+                    "最高": "最高", "最低": "最低", "成交量": "成交量", "成交额": "成交额"
+                })
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
+                df = df.sort_values("日期").reset_index(drop=True)
+                print(f"[数据] {stock_code} 东方财富获取{len(df)}条")
+                return df
+        except Exception as e:
+            print(f"[数据] {stock_code} 东方财富 attempt={attempt} 失败: {e}")
+            if attempt < 1:
+                _time.sleep(2)
+
+    print(f"[数据] 获取行情失败 {stock_code}")
+    return pd.DataFrame()
+
+
+def get_batch_stock_prices(codes: List[str], max_workers: int = 5) -> Dict[str, pd.DataFrame]:
+    """并行获取多只股票行情（提速 3-5 倍）"""
+    results = {}
+    
+    def fetch_one(code: str) -> Tuple[str, pd.DataFrame]:
+        df = get_stock_price(code)
+        return code, df
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(fetch_one, code): code for code in codes}
+        for future in as_completed(futures):
+            try:
+                code, df = future.result()
+                if not df.empty:
+                    results[code] = df
+            except Exception as e:
+                code = futures[future]
+                print(f"[并行] {code} 获取失败: {e}")
+    
+    print(f"[并行] 成功获取 {len(results)}/{len(codes)} 只股票行情")
+    return results
 
 
 def get_stock_info(stock_code: str) -> Dict:
@@ -380,8 +423,161 @@ def calculate_technical(df: pd.DataFrame) -> Dict:
     }
 
 
+def get_realtime_quotes(stock_codes: List[str]) -> List[Dict]:
+    """获取实时行情（新浪接口）
+    
+    Args:
+        stock_codes: 股票代码列表，如 ['000001', '600519']
+    
+    Returns:
+        [{code, name, price, change, change_pct, volume, amount, high, low, open, prev_close}, ...]
+    """
+    if not stock_codes:
+        return []
+    
+    # 添加 sh/sz 前缀（沪市6开头，深市0/3开头）
+    sina_codes = []
+    for c in stock_codes:
+        if c.startswith(("6", "9")):
+            sina_codes.append("sh" + c)
+        else:
+            sina_codes.append("sz" + c)
+    
+    # 新浪实时行情 API
+    codes_str = ','.join(sina_codes)
+    url = f"https://hq.sinajs.cn/list={codes_str}"
+    
+    headers = {
+        'Referer': 'https://finance.sina.com.cn',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.encoding = 'gbk'
+        
+        results = []
+        for line in r.text.strip().split('\n'):
+            if not line or '=' not in line:
+                continue
+            
+            # 解析: var hq_str_sz000333="美的集团,12.34,..."
+            parts = line.split('="')
+            if len(parts) != 2:
+                continue
+            
+            # 提取原始代码（去掉 sh/sz 前缀）
+            raw = parts[0]  # e.g. hq_str_sz000333
+            code_part = raw.split('_')[-1]  # e.g. sz000333
+            if code_part.startswith(('sh', 'sz')):
+                code = code_part[2:]  # 去掉 sh/sz，得到 000333
+            else:
+                continue
+            
+            data = parts[1].rstrip('";').split(',')
+            
+            if len(data) < 32:
+                continue
+            
+            name = data[0]
+            open_price = float(data[1]) if data[1] else 0
+            prev_close = float(data[2]) if data[2] else 0
+            price = float(data[3]) if data[3] else 0
+            high = float(data[4]) if data[4] else 0
+            low = float(data[5]) if data[5] else 0
+            volume = int(float(data[8])) if data[8] else 0
+            amount = float(data[9]) if data[9] else 0
+            
+            change = price - prev_close if prev_close > 0 else 0
+            change_pct = (change / prev_close * 100) if prev_close > 0 else 0
+            
+            results.append({
+                'code': code,
+                'name': name,
+                'price': round(price, 2),
+                'open': round(open_price, 2),
+                'high': round(high, 2),
+                'low': round(low, 2),
+                'prev_close': round(prev_close, 2),
+                'change': round(change, 2),
+                'change_pct': round(change_pct, 2),
+                'volume': volume,
+                'amount': round(amount, 2)
+            })
+        
+        return results
+        
+    except Exception as e:
+        print(f"获取实时行情失败: {e}")
+        return []
+
+
+def get_sina_realtime(codes: List[str]) -> Dict[str, Dict]:
+    """获取实时行情（兼容 run_virtual_v4.py 格式）
+    
+    Returns:
+        {code: {name, open, last_close, current, high, low, volume, amount, change_pct}, ...}
+    """
+    if not codes:
+        return {}
+    
+    quotes = get_realtime_quotes(codes)
+    result = {}
+    for q in quotes:
+        result[q['code']] = {
+            'name': q['name'],
+            'open': q['open'],
+            'last_close': q['prev_close'],
+            'current': q['price'],
+            'high': q['high'],
+            'low': q['low'],
+            'volume': q['volume'],
+            'amount': q['amount'],
+            'change_pct': q['change_pct']
+        }
+    return result
+
+
+def get_simple_market_regime() -> str:
+    """简单市场状态判断（兼容 run_virtual_v4.py 格式）
+    
+    Returns:
+        "牛市" | "熊市" | "震荡市"
+    """
+    try:
+        r = requests.get(
+            "https://hq.sinajs.cn/list=sh000300",
+            headers={"Referer": "https://finance.sina.com.cn"},
+            timeout=10
+        )
+        fields = r.text.split('"')[1].split(",")
+        if len(fields) >= 4:
+            current = float(fields[3])
+            last_close = float(fields[2])
+            change_pct = (current / last_close - 1) * 100 if last_close > 0 else 0
+            
+            if change_pct > 1:
+                return "牛市"
+            elif change_pct < -1:
+                return "熊市"
+            else:
+                return "震荡市"
+    except:
+        pass
+    return "震荡市"
+
+
 if __name__ == "__main__":
     # 测试
     print("=== 测试数据获取 ===")
     heat = get_market_heat()
     print(f"市场热度: {heat}")
+    
+    # 测试 get_sina_realtime
+    print("\n=== 测试 get_sina_realtime ===")
+    data = get_sina_realtime(['000333', '600519'])
+    for code, d in data.items():
+        print(f"{code}: {d['name']} 現价={d['current']} ({d['change_pct']:+.2f}%)")
+    
+    # 测试 get_simple_market_regime
+    print(f"\n市场状态: {get_simple_market_regime()}")
