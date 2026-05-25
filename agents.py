@@ -22,7 +22,7 @@ def get_llm():
         api_key=api_key,
         base_url=base_url,
         temperature=0.3,
-        max_tokens=4096
+        max_tokens=2048  # 优化：从 4096 减少到 2048，加快响应
     )
 
 

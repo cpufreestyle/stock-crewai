@@ -1,0 +1,45 @@
+{
+  "date": "2026-05-25",
+  "datetime": "2026-05-25T14:40:36.433836",
+  "market_status": "火热",
+  "recommended_position": "牛市",
+  "notes": "推荐5只股票",
+  "stocks": [
+    {
+      "code": "000100",
+      "name": "电子行业**",
+      "target": null,
+      "stop": null,
+      "reason": "1. **000100 电子行业**"
+    },
+    {
+      "code": "002475",
+      "name": "电子制造**",
+      "target": null,
+      "stop": null,
+      "reason": "2. **002475 电子制造**"
+    },
+    {
+      "code": "000425",
+      "name": "工程机械**",
+      "target": null,
+      "stop": null,
+      "reason": "3. **000425 工程机械**"
+    },
+    {
+      "code": "000651",
+      "name": "家电行业**",
+      "target": null,
+      "stop": null,
+      "reason": "4. **000651 家电行业**"
+    },
+    {
+      "code": "000333",
+      "name": "家电行业**",
+      "target": null,
+      "stop": null,
+      "reason": "5. **000333 家电行业**"
+    }
+  ],
+  "tracked": false
+}

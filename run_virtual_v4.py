@@ -30,6 +30,17 @@ from pathlib import Path
 import portfolio_tracker as pt
 import risk_manager as rm
 import data_fetcher as df
+import logging
+from logging.handlers import RotatingFileHandler
+
+from config import (
+    MAX_POSITIONS, MAX_POSITION_RATIO, SINGLE_POSITION_RATIO,
+    STOP_LOSS_RATIO, TAKE_PROFIT_RATIO, ATR_STOP_MULTIPLIER, ATR_PROFIT_MULTIPLIER,
+    ATR_HOLDING_DAYS, MIN_CHANGE_PCT, MAX_CHANGE_PCT,
+    GOOD_CHANGE_LOW, GOOD_CHANGE_HIGH, MIN_TECH_SCORE,
+    NEAR_TAKE_PROFIT_PCT, ATR_STOP_LOSS_ENABLED,
+    LOG_MAX_BYTES, LOG_BACKUP_COUNT, NET_VALUE_HISTORY_FILE,
+)
 
 # 尝试导入通知模块
 try:
@@ -82,23 +93,46 @@ LOG_MAX_FILES = LOG_KEEP_DAYS * 24 * 6  # 每10分钟一次，约7天量
 
 
 # ========== 日志管理 ==========
+def setup_logging():
+    """配置日志系统（使用 RotatingFileHandler）"""
+    history_dir = Path(__file__).parent / "history"
+    history_dir.mkdir(exist_ok=True)
+    
+    log_file = history_dir / "trading.log"
+    handler = RotatingFileHandler(
+        log_file,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8"
+    )
+    fmt = "%(asctime)s [%(levelname)s] %(message)s"
+    handler.setFormatter(logging.Formatter(fmt, datefmt="%Y-%m-%d %H:%M:%S"))
+    
+    logger = logging.getLogger("trading")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        logger.addHandler(handler)
+        console = logging.StreamHandler()
+        console.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(console)
+    
+    return logger
+
 def cleanup_old_logs():
-    """清理过期的日志文件"""
+    """清理过期的历史日志文件"""
     history_dir = Path(__file__).parent / "history"
     history_dir.mkdir(exist_ok=True)
     
     log_files = sorted(history_dir.glob("run_log_*.json"), key=lambda f: f.stat().st_mtime)
-    
-    if len(log_files) > LOG_MAX_FILES:
-        for f in log_files[:-LOG_MAX_FILES]:
+    if len(log_files) > 20:
+        for f in log_files[:-20]:
             try:
                 f.unlink()
             except:
                 pass
     
-    # 也清理 trades 文件
     trade_files = sorted(history_dir.glob("trades_*.json"), key=lambda f: f.stat().st_mtime)
-    if len(trade_files) > 30:  # 保留更多交易记录
+    if len(trade_files) > 30:
         for f in trade_files[:-30]:
             try:
                 f.unlink()
@@ -145,9 +179,9 @@ def check_portfolio_risk(portfolio_positions, realtime_data):
                         atr = ti.calculate_atr(highs, lows, closes)
                         if atr:
                             # ATR止损：价格 - 2倍ATR
-                            dynamic_stop_loss = round(current_price - 2 * atr, 2)
+                            dynamic_stop_loss = round(current_price - ATR_STOP_MULTIPLIER * atr, 2)
                             # 动态止损不能比固定止损更宽松
-                            fixed_stop = round(current_price * 0.92, 2)
+                            fixed_stop = round(current_price * STOP_LOSS_RATIO, 2)
                             if dynamic_stop_loss > fixed_stop:
                                 dynamic_stop_loss = fixed_stop
             except:
@@ -260,11 +294,11 @@ def advanced_filter(realtime_data, portfolio_positions, cash, total_capital):
         
         if is_post_market:
             # 盘后：放宽筛选条件，关注技术信号
-            if change_pct <= 0:
+            if change_pct <= MIN_CHANGE_PCT:
                 continue
         else:
             # 盘中：正常筛选
-            if not (0 < change_pct <= 6):
+            if not (MIN_CHANGE_PCT < change_pct <= MAX_CHANGE_PCT):
                 continue
         
         if data["current"] > 200:
@@ -280,9 +314,9 @@ def advanced_filter(realtime_data, portfolio_positions, cash, total_capital):
         if data["current"] > data["open"]:
             tech_score += 1
         
-        if 1 < change_pct <= 4:
+        if GOOD_CHANGE_LOW < change_pct <= GOOD_CHANGE_HIGH:
             tech_score += 2
-        elif 4 < change_pct <= 6:
+        elif GOOD_CHANGE_HIGH < change_pct <= MAX_CHANGE_PCT:
             tech_score += 1
         
         if data["volume"] > 500000:
@@ -325,7 +359,7 @@ def advanced_filter(realtime_data, portfolio_positions, cash, total_capital):
         elif market_regime == "牛市" and tech_score >= 3:
             pass  # 牛市可降低要求
         
-        max_position = total_capital * 0.20
+        max_position = total_capital * SINGLE_POSITION_RATIO
         shares = int(max_position / data["current"] / 100) * 100
         
         # A股最低100股限制
@@ -360,7 +394,7 @@ def execute_buy(candidates, portfolio_positions, cash, total_capital, realtime_d
     buys = []
     
     position_count = len(portfolio_positions)
-    max_positions = 5
+    max_positions = MAX_POSITIONS
     
     total_position_value = sum(
         realtime_data.get(code, {}).get("current", pos["avg_cost"]) * pos["shares"]
@@ -376,7 +410,7 @@ def execute_buy(candidates, portfolio_positions, cash, total_capital, realtime_d
         if position_count + buys_count >= max_positions:
             break
         
-        if position_ratio > 0.80:
+        if position_ratio > MAX_POSITION_RATIO:
             break
         
         if cand["position_value"] > remaining_cash:
@@ -394,17 +428,17 @@ def execute_buy(candidates, portfolio_positions, cash, total_capital, realtime_d
                 if "error" not in analysis and analysis.get("atr"):
                     # ATR止损
                     atr = analysis["atr"]
-                    stop_loss = round(price - 2 * atr, 2)
-                    take_profit = round(price + 3 * atr, 2)
+                    stop_loss = round(price - ATR_STOP_MULTIPLIER * atr, 2)
+                    take_profit = round(price + ATR_PROFIT_MULTIPLIER * atr, 2)
                 else:
-                    stop_loss = round(price * 0.92, 2)
-                    take_profit = round(price * 1.20, 2)
+                    stop_loss = round(price * STOP_LOSS_RATIO, 2)
+                    take_profit = round(price * TAKE_PROFIT_RATIO, 2)
             except:
-                stop_loss = round(price * 0.92, 2)
-                take_profit = round(price * 1.20, 2)
+                stop_loss = round(price * STOP_LOSS_RATIO, 2)
+                take_profit = round(price * TAKE_PROFIT_RATIO, 2)
         else:
-            stop_loss = round(price * 0.92, 2)
-            take_profit = round(price * 1.20, 2)
+            stop_loss = round(price * STOP_LOSS_RATIO, 2)
+            take_profit = round(price * TAKE_PROFIT_RATIO, 2)
         
         result = pt.update_position(
             stock_code=cand["code"],
@@ -637,6 +671,36 @@ def run_once():
         }, f, ensure_ascii=False, indent=2)
     
     print(f"\n运行日志已保存: {log_file}")
+    
+    # 记录净值历史
+    try:
+        nv_file = Path(__file__).parent / NET_VALUE_HISTORY_FILE
+        history = []
+        if nv_file.exists():
+            with open(nv_file, "r", encoding="utf-8") as nvf:
+                history = json.load(nvf)
+        
+        # 避免同一分钟重复记录
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        if not history or history[-1].get("timestamp", "")[:16] != ts:
+            history.append({
+                "timestamp": datetime.now().isoformat(),
+                "total_value": total_value,
+                "cash": cash,
+                "return_pct": total_return_pct,
+                "positions": len(positions),
+                "sharpe": metrics.get("sharpe_ratio", "N/A") if metrics else "N/A",
+                "max_drawdown": metrics.get("max_drawdown", "N/A") if metrics else "N/A",
+            })
+            
+            # 保留最近 1000 条记录
+            if len(history) > 1000:
+                history = history[-1000:]
+            
+            with open(nv_file, "w", encoding="utf-8") as nvf:
+                json.dump(history, nvf, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"净值历史记录失败: {e}")
     
     return portfolio
 

@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock CrewAI Dashboard</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.bootcdn.net/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+        .dashboard-container {
+            padding: 20px;
+        }
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .metric-card {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .metric-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        .positive { color: #28a745; }
+        .negative { color: #dc3545; }
+        .neutral { color: #6c757d; }
+        .position-table {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+        }
+        .chart-container {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .refresh-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.5);
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+        .refresh-btn:hover {
+            transform: scale(1.1);
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+        .trade-history {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .badge-profit { background-color: #28a745; }
+        .badge-loss { background-color: #dc3545; }
+        .header-title {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        .auto-refresh {
+            color: white;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <h1 class="header-title">
+            <i class="fas fa-chart-line"></i> Stock CrewAI Dashboard
+        </h1>
+
+        <p class="auto-refresh">
+            <i class="fas fa-sync-alt"></i> 自动刷新: 每 30 秒 |
+            上次更新: <span id="lastUpdate">-</span>
+        </p>
+
+        <!-- 核心指标 -->
+        <div class="row">
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="metric-label"><i class="fas fa-wallet"></i> 总资产</div>
+                    <div class="metric-value" id="totalValue">-</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="metric-label"><i class="fas fa-coins"></i> 现金</div>
+                    <div class="metric-value" id="cash">-</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="metric-label"><i class="fas fa-chart-pie"></i> 总收益</div>
+                    <div class="metric-value" id="totalPnl">-</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="metric-card">
+                    <div class="metric-label"><i class="fas fa-percentage"></i> 收益率</div>
+                    <div class="metric-value" id="totalPnlPct">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 持仓表格 & 收益曲线 -->
+        <div class="row">
+            <div class="col-md-8">
+                <div class="chart-container">
+                    <h5><i class="fas fa-chart-area"></i> 收益曲线</h5>
+                    <div id="performanceChart" style="height: 300px;"></div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="chart-container">
+                    <h5><i class="fas fa-chart-pie"></i> 持仓分布</h5>
+                    <div id="positionPie" style="height: 300px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 持仓明细 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="position-table">
+                    <h5><i class="fas fa-list"></i> 持仓明细</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>代码</th>
+                                    <th>名称</th>
+                                    <th>数量</th>
+                                    <th>成本</th>
+                                    <th>现价</th>
+                                    <th>市值</th>
+                                    <th>盈亏</th>
+                                    <th>盈亏%</th>
+                                    <th>止损</th>
+                                    <th>止盈</th>
+                                </tr>
+                            </thead>
+                            <tbody id="positionsTable">
+                                <tr><td colspan="10" class="loading">加载中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 交易历史 & AI 分析 -->
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="position-table trade-history">
+                    <h5><i class="fas fa-history"></i> 交易历史</h5>
+                    <div id="tradeHistory">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="position-table">
+                    <h5>
+                        <i class="fas fa-robot"></i> AI 分析报告
+                        <button class="btn btn-sm btn-primary float-end" onclick="runAnalysis()">
+                            <i class="fas fa-play"></i> 运行分析
+                        </button>
+                    </h5>
+                    <div id="analysisReport" style="max-height: 400px; overflow-y: auto;">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 刷新按钮 -->
+    <button class="refresh-btn" onclick="refreshAll()">
+        <i class="fas fa-sync-alt fa-lg"></i>
+    </button>
+
+    <script>
+        let performanceChart;
+        let positionPie;
+
+        // 初始化图表
+        function initCharts() {
+            performanceChart = echarts.init(document.getElementById('performanceChart'));
+            positionPie = echarts.init(document.getElementById('positionPie'));
+        }
+
+        // 格式化数字
+        function formatNumber(num, decimals = 2) {
+            return num.toLocaleString('zh-CN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+        }
+
+        // 更新指标卡片
+        function updateMetrics(data) {
+            const totalValue = document.getElementById('totalValue');
+            const cash = document.getElementById('cash');
+            const totalPnl = document.getElementById('totalPnl');
+            const totalPnlPct = document.getElementById('totalPnlPct');
+
+            totalValue.textContent = '¥' + formatNumber(data.total_value);
+            cash.textContent = '¥' + formatNumber(data.cash);
+
+            totalPnl.textContent = (data.total_pnl >= 0 ? '+' : '') + '¥' + formatNumber(data.total_pnl);
+            totalPnl.className = 'metric-value ' + (data.total_pnl >= 0 ? 'positive' : 'negative');
+
+            totalPnlPct.textContent = (data.total_pnl_pct >= 0 ? '+' : '') + data.total_pnl_pct.toFixed(2) + '%';
+            totalPnlPct.className = 'metric-value ' + (data.total_pnl_pct >= 0 ? 'positive' : 'negative');
+
+            document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('zh-CN');
+        }
+
+        // 更新持仓表格
+        function updatePositions(positions) {
+            const tbody = document.getElementById('positionsTable');
+
+            if (!positions || positions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">当前空仓</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = positions.map(p => `
+                <tr>
+                    <td><strong>${p.code}</strong></td>
+                    <td>${p.name}</td>
+                    <td>${p.shares}</td>
+                    <td>¥${p.avg_cost.toFixed(2)}</td>
+                    <td>¥${p.current_price.toFixed(2)}</td>
+                    <td>¥${formatNumber(p.market_value)}</td>
+                    <td class="${p.pnl >= 0 ? 'positive' : 'negative'}">
+                        ${p.pnl >= 0 ? '+' : ''}¥${formatNumber(p.pnl)}
+                    </td>
+                    <td class="${p.pnl_pct >= 0 ? 'positive' : 'negative'}">
+                        ${p.pnl_pct >= 0 ? '+' : ''}${p.pnl_pct.toFixed(2)}%
+                    </td>
+                    <td>${p.stop_loss > 0 ? '¥' + p.stop_loss.toFixed(2) : '-'}</td>
+                    <td>${p.take_profit > 0 ? '¥' + p.take_profit.toFixed(2) : '-'}</td>
+                </tr>
+            `).join('');
+
+            // 更新持仓分布饼图
+            updatePositionPie(positions);
+        }
+
+        // 更新持仓分布饼图
+        function updatePositionPie(positions) {
+            const data = positions.map(p => ({
+                name: p.name,
+                value: p.market_value
+            }));
+
+            positionPie.setOption({
+                tooltip: {
+                    trigger: 'item',
+                    formatter: '{b}: ¥{c} ({d}%)'
+                },
+                series: [{
+                    type: 'pie',
+                    radius: '60%',
+                    data: data,
+                    itemStyle: {
+                        emphasis: {
+                            shadowBlur: 10,
+                            shadowOffsetX: 0,
+                            shadowColor: 'rgba(0, 0, 0, 0.5)'
+                        }
+                    },
+                    label: {
+                        formatter: '{b}\n{d}%'
+                    }
+                }]
+            });
+        }
+
+        // 更新收益曲线
+        function updatePerformanceChart(data) {
+            if (!data || data.length === 0) return;
+
+            const dates = data.map(d => d.date);
+            const values = data.map(d => d.value);
+            const returns = data.map(d => d.return_pct);
+
+            performanceChart.setOption({
+                tooltip: {
+                    trigger: 'axis'
+                },
+                legend: {
+                    data: ['净值', '收益率%']
+                },
+                grid: {
+                    left: '3%',
+                    right: '4%',
+                    bottom: '3%',
+                    containLabel: true
+                },
+                xAxis: {
+                    type: 'category',
+                    data: dates,
+                    axisLabel: {
+                        rotate: 45
+                    }
+                },
+                yAxis: [
+                    {
+                        type: 'value',
+                        name: '净值',
+                        position: 'left'
+                    },
+                    {
+                        type: 'value',
+                        name: '收益率%',
+                        position: 'right'
+                    }
+                ],
+                series: [
+                    {
+                        name: '净值',
+                        type: 'line',
+                        data: values,
+                        smooth: true,
+                        itemStyle: { color: '#667eea' },
+                        areaStyle: {
+                            color: {
+                                type: 'linear',
+                                x: 0, y: 0, x2: 0, y2: 1,
+                                colorStops: [
+                                    { offset: 0, color: 'rgba(102, 126, 234, 0.3)' },
+                                    { offset: 1, color: 'rgba(102, 126, 234, 0.05)' }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        name: '收益率%',
+                        type: 'line',
+                        yAxisIndex: 1,
+                        data: returns,
+                        smooth: true,
+                        itemStyle: { color: '#28a745' }
+                    }
+                ]
+            });
+        }
+
+        // 更新交易历史
+        function updateTradeHistory(trades) {
+            const container = document.getElementById('tradeHistory');
+
+            if (!trades || trades.length === 0) {
+                container.innerHTML = '<div class="text-center text-muted">暂无交易记录</div>';
+                return;
+            }
+
+            container.innerHTML = trades.slice(-20).reverse().map(t => `
+                <div class="mb-2 p-2 border-bottom">
+                    <div class="d-flex justify-content-between">
+                        <span>
+                            <span class="badge ${t.action === 'buy' ? 'bg-primary' : 'bg-warning'}">${t.action === 'buy' ? '买入' : '卖出'}</span>
+                            <strong>${t.name}</strong> (${t.code})
+                        </span>
+                        <small class="text-muted">${new Date(t.date).toLocaleString('zh-CN')}</small>
+                    </div>
+                    <div class="mt-1">
+                        ${t.shares}股 @ ¥${t.price.toFixed(2)}
+                        ${t.pnl !== undefined ? `<span class="${t.pnl >= 0 ? 'positive' : 'negative'} float-end">${t.pnl >= 0 ? '+' : ''}¥${t.pnl.toFixed(2)} (${t.pnl_pct >= 0 ? '+' : ''}${t.pnl_pct.toFixed(2)}%)</span>` : ''}
+                    </div>
+                    ${t.reason ? `<small class="text-muted">${t.reason}</small>` : ''}
+                </div>
+            `).join('');
+        }
+
+        // 更新 AI 分析报告
+        function updateAnalysis(content) {
+            const container = document.getElementById('analysisReport');
+
+            if (!content) {
+                container.innerHTML = '<div class="text-center text-muted">暂无分析报告</div>';
+                return;
+            }
+
+            // 简单的 Markdown 渲染
+            let html = content
+                .replace(/### (.*)/g, '<h6>$1</h6>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+
+            container.innerHTML = `<div class="markdown-content">${html}</div>`;
+        }
+
+        // 运行 AI 分析
+        async function runAnalysis() {
+            try {
+                const response = await fetch('/api/run_analysis', { method: 'POST' });
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('分析任务已启动，请稍后刷新查看结果');
+                } else {
+                    alert('启动失败: ' + result.message);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        // 刷新所有数据
+        async function refreshAll() {
+            try {
+                // 并行请求
+                const [portfolioRes, performanceRes, tradesRes, analysisRes] = await Promise.all([
+                    fetch('/api/portfolio'),
+                    fetch('/api/performance'),
+                    fetch('/api/trades'),
+                    fetch('/api/analysis')
+                ]);
+
+                const portfolio = await portfolioRes.json();
+                const performance = await performanceRes.json();
+                const trades = await tradesRes.json();
+                const analysis = await analysisRes.json();
+
+                if (portfolio.success) {
+                    updateMetrics(portfolio.data);
+                    updatePositions(portfolio.data.positions);
+                }
+
+                if (performance.success) {
+                    updatePerformanceChart(performance.data);
+                }
+
+                if (trades.success) {
+                    updateTradeHistory(trades.data);
+                }
+
+                if (analysis.success) {
+                    updateAnalysis(analysis.data);
+                }
+
+            } catch (error) {
+                console.error('Error refreshing data:', error);
+            }
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initCharts();
+            refreshAll();
+
+            // 自动刷新（每 30 秒）
+            setInterval(refreshAll, 30000);
+        });
+
+        // 窗口大小改变时重绘图表
+        window.addEventListener('resize', function() {
+            if (performanceChart) performanceChart.resize();
+            if (positionPie) positionPie.resize();
+        });
+    </script>
+</body>
+</html>

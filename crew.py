@@ -1,3 +1,4 @@
+import config
 """
 CrewAI 主编排 - 多智能体炒股系统 v3.0
 新增: 市场状态判断、板块轮动分析、推荐追踪
@@ -10,6 +11,7 @@ from tasks import (
     create_risk_task,
     create_trading_task
 )
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import data_fetcher as df
 import portfolio_tracker as pt
 from backtest import multi_strategy_backtest
@@ -20,8 +22,8 @@ import os
 import sys
 
 
-def prepare_market_data(n_stocks: int = 20) -> str:
-    """准备市场数据给LLM分析"""
+def prepare_market_data(n_stocks: int = 10) -> str:
+    """准备市场数据给LLM分析（优化：并行获取 + 精简数量）"""
     lines = []
     
     # 市场情绪
@@ -48,23 +50,27 @@ def prepare_market_data(n_stocks: int = 20) -> str:
     portfolio_summary = pt.get_portfolio_summary()
     lines.append(f"\n当前持仓状态:\n{portfolio_summary}")
     
-    # 从候选股票池中抽样获取行情
+    # 从候选股票池中抽样（精简到 10 只）
     pool = df.get_index_components()["code"].tolist()[:n_stocks]
+    
+    # 并行获取所有股票行情（优化点）
+    print(f"[并行] 正在获取 {len(pool)} 只股票行情...")
+    prices_map = df.get_batch_stock_prices(pool)
     
     lines.append(f"\n候选股票池行情（共{len(pool)}只，分析最近90天）:")
     
     for code in pool:
         try:
-            price_data = df.get_stock_price(code)
-            info = df.get_stock_info(code)
-            name = info.get("股票简称", code)
+            price_data = prices_map.get(code)
+            name = code
             sector = ""
             for s in df.A_SHARE_POOL:
                 if s["code"] == code:
+                    name = s["name"]
                     sector = s["sector"]
                     break
             
-            if not price_data.empty:
+            if price_data is not None and not price_data.empty:
                 tech = df.calculate_technical(price_data)
                 
                 ma_bull = ""
@@ -148,7 +154,7 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
     print("[完成]\n")
     
     # 2. 检查 API Key
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
+    api_key = config.API_KEY
     if not api_key or api_key == "sk-your-key-here":
         print("[错误] 请先在 .env 中配置 API Key")
         return "未配置 API Key"
@@ -209,12 +215,11 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
     print("[完成]\n")
     
     # 7. 执行 Crew
-    print("[6/8] 启动 CrewAI 编排（3-8分钟）...")
+    print("[6/8] 启动 CrewAI 编排（顺序模式，约2-4分钟）...")
     crew = Crew(
         agents=[market_watcher, researcher, risk_mgr, trader],
         tasks=[market_task, research_task, risk_task, trading_task],
-        process=Process.hierarchical,
-        manager_llm=MarketWatcher().llm,
+        process=Process.sequential,  # 优化：从 hierarchical 改为 sequential，速度提升 2-3 倍
         verbose=True
     )
     

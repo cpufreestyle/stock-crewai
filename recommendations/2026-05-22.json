@@ -1,0 +1,31 @@
+{
+  "date": "2026-05-22",
+  "datetime": "2026-05-22T14:49:29.204057",
+  "market_status": "火热",
+  "recommended_position": "震荡市",
+  "notes": "推荐3只股票",
+  "stocks": [
+    {
+      "code": "300750",
+      "name": "宁德时代**",
+      "target": null,
+      "stop": null,
+      "reason": "1. **300750 宁德时代**"
+    },
+    {
+      "code": "600519",
+      "name": "贵州茅台**",
+      "target": null,
+      "stop": null,
+      "reason": "2. **600519 贵州茅台**"
+    },
+    {
+      "code": "002475",
+      "name": "立讯精密**",
+      "target": null,
+      "stop": null,
+      "reason": "3. **002475 立讯精密**"
+    }
+  ],
+  "tracked": false
+}

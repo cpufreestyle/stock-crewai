@@ -27,6 +27,11 @@ history/
 # 日志
 *.log
 
+# Docker
+.docker/
+data/
+portfolio.json.example
+
 # 临时文件
 temp_*.py
 test_*.py

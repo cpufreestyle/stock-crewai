@@ -1,0 +1,56 @@
+services:
+  stock-crewai:
+    build: .
+    container_name: stock-crewai
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # 持久化：持仓数据 + 运行日志
+      - ./data:/app/data
+      - ./history:/app/history
+      - ./portfolio.json:/app/portfolio.json
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+    # 默认循环模式
+    command: ["python", "run_virtual_v4.py", "--loop"]
+
+  # CrewAI 多智能体分析（可选，每日运行）
+  stock-analyst:
+    build: .
+    container_name: stock-analyst
+    restart: "no"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./history:/app/history
+      - ./portfolio.json:/app/portfolio.json
+      - ./result_latest.md:/app/result_latest.md
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+    # 需要手动启动: docker compose run stock-analyst
+    command: ["python", "crew.py"]
+    profiles:
+      - analyst
+
+  # Web Dashboard（交易监控面板）
+  web-dashboard:
+    build: .
+    container_name: web-dashboard
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./history:/app/history
+      - ./portfolio.json:/app/portfolio.json
+      - ./result_latest.md:/app/result_latest.md
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "5000:5000"
+    command: ["python", "web_dashboard.py"]
