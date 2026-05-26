@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import config
 """
 CrewAI 主编排 - 多智能体炒股系统 v3.0

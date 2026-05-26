@@ -90,7 +90,21 @@ def calculate_macd(prices: List[float], fast: int = 12, slow: int = 26, signal: 
 
 
 def calculate_rsi(prices: List[float], period: int = 14) -> Optional[float]:
-    """计算RSI指标"""
+    """
+    计算RSI指标（相对强弱指数）
+    
+    Args:
+        prices: 价格列表
+        period: 计算周期，默认14
+    
+    Returns:
+        RSI值（0-100），None表示数据不足
+    
+    Notes:
+        RSI > 70: 超买区域
+        RSI < 30: 超卖区域
+        RSI = 50: 多空平衡
+    """
     if len(prices) < period + 1:
         return None
     
@@ -119,7 +133,22 @@ def calculate_rsi(prices: List[float], period: int = 14) -> Optional[float]:
 
 
 def calculate_bollinger(prices: List[float], period: int = 20, std_dev: int = 2) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """计算布林带"""
+    """
+    计算布林带（Bollinger Bands）
+    
+    Args:
+        prices: 价格列表
+        period: 计算周期，默认20
+        std_dev: 标准差倍数，默认2
+    
+    Returns:
+        (上轨, 中轨, 下轨)，None表示数据不足
+    
+    Notes:
+        价格触及上轨：可能超买
+        价格触及下轨：可能超卖
+        布林带收窄：波动率降低，酝酿突破
+    """
     if len(prices) < period:
         return None, None, None
     
@@ -135,7 +164,25 @@ def calculate_bollinger(prices: List[float], period: int = 20, std_dev: int = 2)
 
 
 def calculate_kdj(highs: List[float], lows: List[float], closes: List[float], period: int = 9) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """计算KDJ指标"""
+    """
+    计算KDJ指标（随机指标）
+    
+    Args:
+        highs: 最高价列表
+        lows: 最低价列表
+        closes: 收盘价列表
+        period: 计算周期，默认9
+    
+    Returns:
+        (K值, D值, J值)，None表示数据不足
+    
+    Notes:
+        K > 80: 超买区域
+        K < 20: 超卖区域
+        K上穿D：金叉买入信号
+        K下穿D：死叉卖出信号
+        J值 > 100 或 < 0：极端超买/超卖
+    """
     if len(closes) < period:
         return None, None, None
     
@@ -164,7 +211,23 @@ def calculate_kdj(highs: List[float], lows: List[float], closes: List[float], pe
 
 
 def calculate_atr(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> Optional[float]:
-    """计算ATR（平均真实波幅）"""
+    """
+    计算ATR（平均真实波幅，Average True Range）
+    
+    Args:
+        highs: 最高价列表
+        lows: 最低价列表
+        closes: 收盘价列表
+        period: 计算周期，默认14
+    
+    Returns:
+        ATR值，None表示数据不足
+    
+    Notes:
+        ATR越大：市场波动越剧烈
+        ATR越小：市场波动越平缓
+        用于设置动态止损和仓位管理
+    """
     if len(closes) < period:
         return None
     
@@ -184,7 +247,19 @@ def calculate_atr(highs: List[float], lows: List[float], closes: List[float], pe
 
 
 def analyze_stock(code: str) -> Dict:
-    """综合分析单只股票的技术指标"""
+    """
+    综合分析单只股票的技术指标
+    
+    Args:
+        code: 股票代码
+    
+    Returns:
+        包含各项技术指标和分析信号的字典
+    
+    Notes:
+        signal: BUY/SELL/NEUTRAL
+        综合考虑 MA、MACD、RSI、KDJ、布林带
+    """
     klines = get_history_kline(code, days=60)
     
     if len(klines) < 20:
