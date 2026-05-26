@@ -35,7 +35,7 @@ import data_fetcher as df
 import logging
 from logging.handlers import RotatingFileHandler
 
-from config import (
+from config import reload_config (
     MAX_POSITIONS, MAX_POSITION_RATIO, SINGLE_POSITION_RATIO,
     STOP_LOSS_RATIO, TAKE_PROFIT_RATIO, ATR_STOP_MULTIPLIER, ATR_PROFIT_MULTIPLIER,
     ATR_HOLDING_DAYS, MIN_CHANGE_PCT, MAX_CHANGE_PCT,
@@ -766,6 +766,8 @@ def main():
             else:
                 print(f"[{now.strftime('%H:%M')}] 非交易时段，等待中...")
             
+            if reload_config():
+                print("⚙️ 配置已热重载")
             time.sleep(600)
     else:
         run_once()

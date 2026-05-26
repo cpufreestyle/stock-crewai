@@ -11,6 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from portfolio_tracker import load_portfolio, get_trade_history
 from data_fetcher import get_realtime_quotes
+from circuit_breaker import circuit_breaker
+from backtest import BacktestEngine, load_historical_data, get_date_range, simple_strategy
 
 app = Flask(__name__)
 CORS(app)
@@ -194,6 +196,49 @@ def api_health():
         "status": "ok",
         "time": datetime.now().isoformat()
     })
+
+
+@app.route("/api/risk-status")
+def api_risk_status():
+    """风控状态"""
+    try:
+        cb = circuit_breaker.status()
+        from config import CIRCUIT_BREAKER_DAILY_LOSS_PCT, CIRCUIT_BREAKER_CONSECUTIVE_STOPS
+        return jsonify({
+            "success": True,
+            "data": {
+                "is_trading": cb["is_trading"],
+                "daily_loss_pct": cb.get("daily_loss_pct", 0),
+                "consecutive_stops": cb.get("consecutive_stops", 0),
+                "daily_loss_limit": CIRCUIT_BREAKER_DAILY_LOSS_PCT,
+                "consecutive_limit": CIRCUIT_BREAKER_CONSECUTIVE_STOPS,
+                "remaining_minutes": cb.get("remaining_minutes", 0),
+                "reason": cb.get("reason", ""),
+            }
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/backtest")
+def api_backtest():
+    """运行回测"""
+    try:
+        from datetime import datetime as dt
+        end_date = dt.now().strftime("%Y%m%d")
+        start_dt = dt.now() - timedelta(days=30)
+        start_date = start_dt.strftime("%Y%m%d")
+
+        dates = get_date_range(start_date, end_date)
+        historical_data = load_historical_data(dates)
+
+        engine = BacktestEngine(capital=100000)
+        engine.run(historical_data, dates, strategy_fn=simple_strategy)
+        report = engine.get_report()
+
+        return jsonify({"success": True, "data": report})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 
 if __name__ == "__main__":

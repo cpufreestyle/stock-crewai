@@ -206,9 +206,31 @@
                 </div>
             </div>
         </div>
+        <!-- 风控状态 & 快捷操作 -->
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="position-table">
+                    <h5><i class="fas fa-shield-alt"></i> 风控状态</h5>
+                    <div id="riskStatus">
+                        <div class="loading">加载中...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="position-table">
+                    <h5>
+                        <i class="fas fa-flask"></i> 策略回测
+                        <button class="btn btn-sm btn-success float-end" onclick="runBacktest()">
+                            <i class="fas fa-play"></i> 运行回测
+                        </button>
+                    </h5>
+                    <div id="backtestResult" style="max-height: 400px; overflow-y: auto;">
+                        <div class="text-muted text-center mt-3">点击"运行回测"查看策略表现</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-
-    <!-- 刷新按钮 -->
     <button class="refresh-btn" onclick="refreshAll()">
         <i class="fas fa-sync-alt fa-lg"></i>
     </button>
@@ -448,7 +470,8 @@
                     fetch('/api/portfolio'),
                     fetch('/api/performance'),
                     fetch('/api/trades'),
-                    fetch('/api/analysis')
+                    fetch('/api/analysis'),
+                    fetch('/api/risk-status')
                 ]);
 
                 const portfolio = await portfolioRes.json();
@@ -471,10 +494,57 @@
 
                 if (analysis.success) {
                     updateAnalysis(analysis.data);
+
+                if (riskRes) {
+                    const riskData = await riskRes.json();
+                    updateRiskStatus(riskData);
+                }
                 }
 
             } catch (error) {
                 console.error('Error refreshing data:', error);
+            }
+        }
+
+        // 风控状态
+        async function updateRiskStatus(data) {
+            const el = document.getElementById('riskStatus');
+            if (!data || !data.success) {
+                el.innerHTML = '<div class="text-muted">暂无风控数据</div>';
+                return;
+            }
+            const s = data.data;
+            const statusClass = s.is_trading ? 'success' : 'danger';
+            const statusText = s.is_trading ? '正常交易' : '熔断暂停';
+            el.innerHTML = '<table class="table table-sm mb-0">' +
+                '<tr><td>状态</td><td><span class="badge bg-' + statusClass + '">' + statusText + '</span></td></tr>' +
+                '<tr><td>日亏损</td><td>' + (s.daily_loss_pct || 0) + '%</td></tr>' +
+                '<tr><td>连续止损</td><td>' + (s.consecutive_stops || 0) + ' 次</td></tr>' +
+                '<tr><td>熔断阈值</td><td>' + (s.daily_loss_limit || 3) + '% / ' + (s.consecutive_limit || 3) + '次</td></tr>' +
+                '</table>';
+        }
+
+        async function runBacktest() {
+            const el = document.getElementById('backtestResult');
+            el.innerHTML = '<div class="text-center"><div class="spinner-border"></div><div class="mt-2">回测运行中...</div></div>';
+            try {
+                const res = await fetch('/api/backtest');
+                const data = await res.json();
+                if (data.success) {
+                    const r = data.data;
+                    el.innerHTML = '<table class="table table-sm mb-0">' +
+                        '<tr><td>区间</td><td>' + r.start_date + ' ~ ' + r.end_date + '</td></tr>' +
+                        '<tr><td>最终资产</td><td>¥' + Number(r.final_value).toLocaleString() + '</td></tr>' +
+                        '<tr><td>收益率</td><td class="fw-bold">' + r.total_return_pct + '%</td></tr>' +
+                        '<tr><td>最大回撤</td><td class="text-danger">' + r.max_drawdown_pct + '%</td></tr>' +
+                        '<tr><td>交易次数</td><td>' + r.total_trades + '</td></tr>' +
+                        '<tr><td>胜率</td><td>' + r.win_rate_pct + '%</td></tr>' +
+                        '</table>';
+                } else {
+                    el.innerHTML = '<div class="text-danger">回测失败</div>';
+                }
+            } catch (e) {
+                el.innerHTML = '<div class="text-danger">请求失败: ' + e + '</div>';
             }
         }
 
