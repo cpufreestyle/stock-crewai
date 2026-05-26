@@ -48,6 +48,7 @@ services:
       - ./history:/app/history
       - ./portfolio.json:/app/portfolio.json
       - ./result_latest.md:/app/result_latest.md
+      - ./templates:/app/templates
     environment:
       - TZ=Asia/Shanghai
       - PYTHONUNBUFFERED=1
