@@ -27,6 +27,9 @@ _kronos_model = None
 _kronos_tokenizer = None
 _DEVICE = "cpu"
 
+# 导出标志（供外部检查）
+KRONOS_AVAILABLE = False  # 将在 _load_kronos() 中设为 True
+
 
 def _load_kronos():
     """延迟加载 Kronos 模型（仅首次调用）"""
@@ -38,6 +41,7 @@ def _load_kronos():
     try:
         from transformers import AutoTokenizer, AutoModelForCausalLM
         import torch
+        global KRONOS_AVAILABLE
         _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"[Kronos] Loading NeoQuasar/Kronos-mini on {_DEVICE} ...")
         _kronos_tokenizer = AutoTokenizer.from_pretrained("NeoQuasar/Kronos-mini")
@@ -46,6 +50,7 @@ def _load_kronos():
             torch_dtype=torch.float16 if _DEVICE == "cuda" else torch.float32,
         ).to(_DEVICE)
         print("[Kronos] Model loaded.")
+        KRONOS_AVAILABLE = True
     except ImportError:
         print("[Kronos] WARNING: transformers not installed. Run: pip install transformers torch")
     except Exception as e:
@@ -173,7 +178,7 @@ class KronosPredictor:
             return {"action": "HOLD", "confidence": 0, "predicted_return": 0,
                     "reason": "no price data", "source": "error"}
 
-        # 尝试真实 Kronos 推理
+        # 尝试真实 Kronos 推理（仅当模型可用时）
         _load_kronos()
         signal = {}
 
