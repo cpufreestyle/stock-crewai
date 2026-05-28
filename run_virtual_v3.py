@@ -22,6 +22,15 @@ import time
 from datetime import datetime
 
 import portfolio_tracker as pt
+
+# Kronos 金融时序预测模块（可选）
+try:
+    from kronos_predictor import predict_kronos
+    KRONOS_AVAILABLE = True
+    print("[Kronos] Module loaded successfully")
+except ImportError:
+    KRONOS_AVAILABLE = False
+    print("[Kronos] WARNING: kronos_predictor.py not found, skipping AI signals")
 import risk_manager as rm
 
 # 尝试导入通知模块
@@ -285,6 +294,35 @@ def advanced_filter(realtime_data, portfolio_positions, cash, total_capital):
         if position_value > cash:
             continue
         
+        # === Kronos AI 信号增强（可选）===
+        kronos_bonus = 0
+        kronos_signal = {}
+        kronos_desc = ""
+        if KRONOS_AVAILABLE:
+            try:
+                import data_fetcher as dfetcher
+                kline_df = dfetcher.get_stock_price(code, period="daily")
+                if kline_df is not None and len(kline_df) > 20:
+                    bars = kline_df.tail(30).to_dict("records")
+                    kronos_signal = predict_kronos(code, price=data["current"], bars=bars)
+                    if kronos_signal.get("source") not in ("error", None):
+                        conf = kronos_signal.get("confidence", 0)
+                        action = kronos_signal.get("action", "HOLD")
+                        if action == "BUY":
+                            kronos_bonus = int(conf * 20)
+                        elif action == "SELL":
+                            kronos_bonus = -int(conf * 15)
+                        kronos_desc = f" Kronos={action}({conf:.0%})"
+                else:
+                    kronos_desc = " Kronos=no_data"
+            except Exception as e:
+                kronos_desc = " Kronos=err"
+        else:
+            kronos_desc = ""
+
+        # === 计算最终评分 ===
+        final_score = tech_score + kronos_bonus
+
         candidates.append({
             "code": code,
             "name": data["name"],
@@ -292,12 +330,16 @@ def advanced_filter(realtime_data, portfolio_positions, cash, total_capital):
             "change_pct": change_pct,
             "volume": data["volume"],
             "tech_score": tech_score,
+            "kronos_bonus": kronos_bonus,
+            "final_score": final_score,
+            "kronos_signal": kronos_signal,
+            "kronos_desc": kronos_desc,
             "shares": shares,
             "position_value": position_value
         })
     
     # 按技术评分排序
-    candidates.sort(key=lambda x: (-x["tech_score"], -x["change_pct"]))
+    candidates.sort(key=lambda x: (-x.get("final_score", x["tech_score"]), -x["change_pct"]))
     
     return candidates
 
@@ -425,7 +467,7 @@ def run_once():
     if candidates:
         print(f"候选 {len(candidates)} 只，选取前 3 只:")
         for i, cand in enumerate(candidates[:3], 1):
-            print(f"  {i}. {cand['name']}: {cand['price']:.2f}元 (+{cand['change_pct']:.2f}%) 评分{cand['tech_score']}")
+            print(f"  {i}. {cand['name']}: {cand["price"]:.2f}元 (+{cand["change_pct"]:.2f}%) 评分{cand.get("final_score", cand["tech_score"])}(技术{cand["tech_score"]}{cand.get("kronos_desc","")}")
         
         print("\n=== 执行买入 ===")
         buys = execute_buy(candidates, positions, cash, total_capital, realtime_data)

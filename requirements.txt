@@ -2,8 +2,11 @@ crewai>=1.0.0
 crewai-tools>=1.0.0
 akshare>=1.10.0
 pandas>=2.0.0
+numpy>=1.24.0
 python-dotenv>=1.0.0
 langchain-openai>=0.1.0
+transformers>=4.40.0
+torch>=2.0.0
 
 # Web Dashboard
 flask>=3.0.0
