@@ -35,7 +35,8 @@ import data_fetcher as df
 import logging
 from logging.handlers import RotatingFileHandler
 
-from config import reload_config (
+from config import reload_config
+from config import (
     MAX_POSITIONS, MAX_POSITION_RATIO, SINGLE_POSITION_RATIO,
     STOP_LOSS_RATIO, TAKE_PROFIT_RATIO, ATR_STOP_MULTIPLIER, ATR_PROFIT_MULTIPLIER,
     ATR_HOLDING_DAYS, MIN_CHANGE_PCT, MAX_CHANGE_PCT,
@@ -51,6 +52,16 @@ try:
 except:
     NOTIFIER_AVAILABLE = False
     print("[警告] 通知模块不可用")
+
+
+# Kronos 金融时序预测模块（可选）
+try:
+    from kronos_predictor import predict_kronos
+    KRONOS_AVAILABLE = True
+    print("[Kronos] Module loaded successfully")
+except ImportError:
+    KRONOS_AVAILABLE = False
+    print("[Kronos] WARNING: kronos_predictor.py not found")
 
 # 尝试导入技术指标模块
 try:
@@ -376,6 +387,34 @@ def advanced_filter(realtime_data, portfolio_positions, cash, total_capital):
             if shares < 100:
                 continue
         
+
+        # === Kronos AI 信号增强（可选）===
+        kronos_bonus = 0
+        kronos_desc = ""
+        if KRONOS_AVAILABLE:
+            try:
+                kline_df = df.get_stock_price(code, period="daily")
+                if kline_df is not None and len(kline_df) > 20:
+                    bars = kline_df.tail(30).to_dict("records")
+                    kronos_signal = predict_kronos(code, price=data["current"], bars=bars)
+                    if kronos_signal.get("source") not in ("error", None):
+                        conf = kronos_signal.get("confidence", 0)
+                        action = kronos_signal.get("action", "HOLD")
+                        if action == "BUY":
+                            kronos_bonus = int(conf * 20)
+                        elif action == "SELL":
+                            kronos_bonus = -int(conf * 15)
+                        kronos_desc = f" Kronos={action}({conf:.0%})"
+                else:
+                    kronos_desc = " Kronos=no_data"
+            except Exception as e:
+                kronos_desc = " Kronos=err"
+        else:
+            kronos_desc = ""
+
+        # === 计算最终评分 ===
+        final_score = tech_score + kronos_bonus
+
         candidates.append({
             "code": code,
             "name": data["name"],
@@ -383,11 +422,14 @@ def advanced_filter(realtime_data, portfolio_positions, cash, total_capital):
             "change_pct": change_pct,
             "volume": data["volume"],
             "tech_score": tech_score,
+            "kronos_bonus": kronos_bonus,
+            "final_score": final_score,
+            "kronos_desc": kronos_desc,
             "shares": shares,
             "position_value": position_value
         })
     
-    candidates.sort(key=lambda x: (-x["tech_score"], -x["change_pct"]))
+    candidates.sort(key=lambda x: (-x.get("final_score", x["tech_score"]), -x["change_pct"]))
     return candidates
 
 
