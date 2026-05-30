@@ -35,7 +35,7 @@ import data_fetcher as df
 import logging
 from logging.handlers import RotatingFileHandler
 
-from config import reload_config (
+from config import (
     MAX_POSITIONS, MAX_POSITION_RATIO, SINGLE_POSITION_RATIO,
     STOP_LOSS_RATIO, TAKE_PROFIT_RATIO, ATR_STOP_MULTIPLIER, ATR_PROFIT_MULTIPLIER,
     ATR_HOLDING_DAYS, MIN_CHANGE_PCT, MAX_CHANGE_PCT,
@@ -273,6 +273,72 @@ def execute_sell(portfolio_positions, alerts, realtime_data):
                     pass
     
     return sells
+
+
+# ========== 持仓轮换逻辑（v4.1 新增）==========
+
+def check_position_rotation(portfolio_positions, candidates, realtime_data):
+    """
+    检查持仓轮换机会：如果候选股评分远高于当前持仓，触发轮换
+    返回: [{"sell_code", "sell_name", "buy_cand", "reason"}] 列表
+    """
+    rotations = []
+    
+    if not candidates:
+        return rotations
+    
+    # 计算持仓评分（用盈亏百分比，越高越好）
+    position_scores = {}
+    for code, pos in portfolio_positions.items():
+        current_price = realtime_data.get(code, {}).get("current", pos.get("last_price", pos["avg_cost"]))
+        pnl_pct = (current_price - pos["avg_cost"]) / pos["avg_cost"] * 100
+        position_scores[code] = pnl_pct  # 越高越好
+    
+    # 获取候选股前3名
+    top_candidates = candidates[:3]
+    
+    for cand in top_candidates:
+        # 如果候选股已在持仓中，跳过
+        if cand["code"] in portfolio_positions:
+            continue
+        
+        # 找到持仓中评分最低的（亏损最多的）
+        if not position_scores:
+            break
+        
+        worst_code = min(position_scores, key=position_scores.get)
+        worst_pnl = position_scores[worst_code]
+        worst_pos = portfolio_positions[worst_code]
+        
+        # 轮换条件（满足任一即可）：
+        # 1. 候选评分 >= 8 且 持仓亏损 > 0.5%
+        # 2. 候选评分 >= 7 且 持仓亏损 > 1%
+        # 3. 候选评分 >= 6 且 持仓略亏（更激进）
+        should_rotate = False
+        reason = ""
+        
+        if cand["tech_score"] >= 8 and worst_pnl < -0.5:
+            should_rotate = True
+            reason = f"候选{cand['name']}评分{cand['tech_score']}分 且 持仓{worst_pos['name']}亏损{(-worst_pnl):.2f}%"
+        elif cand["tech_score"] >= 7 and worst_pnl < -1:
+            should_rotate = True
+            reason = f"候选{cand['name']}评分{cand['tech_score']}分 且 持仓{worst_pos['name']}亏损{(-worst_pnl):.2f}%"
+        elif cand["tech_score"] >= 6 and worst_pnl < 0:
+            # 激进策略：候选评分>=6 且 持仓亏损，也轮换
+            should_rotate = True
+            reason = f"轮换：持仓{worst_pos['name']}亏损{(-worst_pnl):.2f}%, 候选{cand['name']}评分{cand['tech_score']}分"
+        
+        if should_rotate:
+            rotations.append({
+                "sell_code": worst_code,
+                "sell_name": worst_pos["name"],
+                "buy_cand": cand,
+                "reason": reason
+            })
+            # 更新 position_scores（模拟已轮换）
+            del position_scores[worst_code]
+    
+    return rotations
 
 
 # ========== 高级筛选（技术指标增强） ==========
@@ -635,6 +701,51 @@ def run_once():
         if not candidates:
             print("  所有候选股票均在冷却期内，跳过买入\n")
         else:
+            # === 持仓轮换检查 ===
+            print("\n=== 检查持仓轮换 ===")
+            rotations = check_position_rotation(positions, candidates, realtime_data)
+            
+            if rotations:
+                print(f"发现 {len(rotations)} 个轮换机会:")
+                for rot in rotations:
+                    print(f"  🔄 {rot['reason']}")
+                    
+                    # 执行轮换：先卖后买
+                    sell_price = realtime_data.get(rot["sell_code"], {}).get("current", 0)
+                    if sell_price <= 0:
+                        print(f"  ⚠️ {rot['sell_name']} 价格无效，跳过轮换")
+                        continue
+                    
+                    sell_result = pt.update_position(
+                        stock_code=rot["sell_code"],
+                        stock_name=rot["sell_name"],
+                        action="sell",
+                        price=sell_price,
+                        shares=positions[rot["sell_code"]]["shares"],
+                        reason=rot["reason"],
+                        current_prices=realtime_data
+                    )
+                    
+                    if "error" not in sell_result:
+                        print(f"  ✅ 已卖出 {rot['sell_name']}")
+                        
+                        # 更新现金和持仓
+                        portfolio = pt.load_portfolio()
+                        cash = portfolio.get("cash", cash)
+                        positions = portfolio.get("positions", {})
+                        
+                        # 买入新股票
+                        buy_cand = rot["buy_cand"]
+                        buy_result = execute_buy([buy_cand], positions, cash, total_capital, realtime_data)
+                        
+                        if buy_result:
+                            print(f"  ✅ 已买入 {buy_cand['name']}")
+                        else:
+                            print(f"  ⚠️ 买入 {buy_cand['name']} 失败")
+            else:
+                print("  无需轮换")
+            
+            # 正常买入逻辑（如果还有现金和仓位）
             print("\n=== 执行买入 ===")
             buys = execute_buy(candidates, positions, cash, total_capital, realtime_data)
         
