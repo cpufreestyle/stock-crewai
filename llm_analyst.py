@@ -12,10 +12,15 @@ llm_client = None
 try:
     import openai
     openai.api_key = os.getenv("OPENAI_API_KEY", "")
+    openai.api_base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     if openai.api_key:
         llm_client = "openai"
         LLM_AVAILABLE = True
-        print("[LLM] 使用 OpenAI")
+        base = os.getenv("OPENAI_BASE_URL", "")
+        if "host.docker.internal" in base or "localhost" in base:
+            print(f"[LLM] 使用本地 OpenAI 兼容 API: {base}")
+        else:
+            print("[LLM] 使用 OpenAI")
 except:
     pass
 

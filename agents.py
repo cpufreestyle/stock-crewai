@@ -15,10 +15,17 @@ def get_llm():
         print("[Agent] 警告: 未设置有效 API Key")
         return None
     
+    # LM Studio（本地）不需要 openai/ 前缀
+    if "host.docker.internal" in base_url or "localhost" in base_url or "127.0.0.1" in base_url:
+        model_str = model  # 直接用模型名，无前缀
+        print(f"[Agent] 使用本地 LLM: {model}")
+    else:
+        model_str = f"openai/{model}"  # OpenRouter/云端 API 需要前缀
+    
     # CrewAI v1.14+ 需要 LLM 对象而非 ChatOpenAI
     from crewai import LLM
     return LLM(
-        model=f"openai/{model}",
+        model=model_str,
         api_key=api_key,
         base_url=base_url,
         temperature=0.3,
