@@ -130,18 +130,18 @@ def run_backtest_for_picks(stock_codes: list) -> str:
 
 
 def notify_wechat(message: str):
-    """通过 openclaw 发送微信通知"""
+    """通过 openclaw 发送微信通知（静默失败，cron delivery 已接管通知）"""
     try:
-        # 使用 openclaw CLI 发送
-        import subprocess
+        import subprocess, shutil
+        if shutil.which("openclaw") is None:
+            return False  # 静默跳过，cron delivery 会处理
         result = subprocess.run(
             ["openclaw", "message", "send", "--channel", "wechat-access", "--message", message[:2000]],
             capture_output=True, text=True, timeout=30
         )
         return result.returncode == 0
-    except Exception as e:
-        print(f"[通知] 发送失败: {e}")
-        return False
+    except Exception:
+        return False  # 静默跳过
 
 
 def run_daily_analysis(with_backtest: bool = True) -> str:
