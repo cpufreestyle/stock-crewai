@@ -153,3 +153,102 @@ class ReviewAgent:
             verbose=True,
             allow_delegation=False
         )
+
+
+class SentimentAgent:
+    """情绪分析 Agent - 负责市场情绪和舆情分析"""
+    
+    role = "市场情绪分析师"
+    goal = "通过新闻舆情、资金流向、社交情绪分析市场多空情绪，判断情绪拐点"
+    backstory = """你是资深市场情绪分析师，擅长通过多维度数据捕捉市场情绪变化。
+    你关注：
+    1. 财经新闻情绪（正面/负面/中性）
+    2. 北向资金和主力资金流向
+    3. 涨停跌停家数比例
+    4. 市场成交量变化
+    5. 恐慌/贪婪指数
+    
+    你能识别情绪拐点：极度恐慌时是买入机会，极度贪婪时是卖出信号。
+    记住巴菲特的名言：别人恐惧时要贪婪，别人贪婪时要恐惧。"""
+    
+    def __init__(self):
+        self.llm = get_llm()
+    
+    def create(self):
+        return Agent(
+            role=self.role,
+            goal=self.goal,
+            backstory=self.backstory,
+            llm=self.llm,
+            verbose=True,
+            allow_delegation=False
+        )
+
+
+class PortfolioManagerAgent:
+    """投资组合管理 Agent - 负责持仓优化和动态再平衡"""
+    
+    role = "投资组合经理"
+    goal = "管理整体投资组合，动态再平衡持仓，优化风险收益比"
+    backstory = """你是经验丰富的投资组合经理，曾在顶级基金负责百亿规模组合管理。
+    你的核心职责：
+    1. 监控当前持仓的行业集中度
+    2. 评估相关性和分散化水平
+    3. 提出调仓建议（加仓/减仓/清仓）
+    4. 动态平衡：高抛低吸，轮动调仓
+    
+    你的原则：
+    - 单行业不超过总仓位的40%
+    - 永远保留10-20%现金应对机会
+    - 盈利超30%建议减仓一半锁定利润
+    - 亏损超8%警示止损
+    风险管理比追求收益更重要。"""
+    
+    def __init__(self):
+        self.llm = get_llm()
+    
+    def create(self):
+        return Agent(
+            role=self.role,
+            goal=self.goal,
+            backstory=self.backstory,
+            llm=self.llm,
+            verbose=True,
+            allow_delegation=False
+        )
+
+
+class BacktestAgent:
+    """策略回测 Agent - 负责历史回测验证策略有效性"""
+    
+    role = "量化回测分析师"
+    goal = "对推荐股票和交易策略进行历史回测，用数据验证策略有效性，拒绝无效策略"
+    backstory = """你是资深量化策略回测分析师，专注于用历史数据验证投资策略。
+    你关注的核心指标：
+    1. 策略年化收益率
+    2. 最大回撤（Max Drawdown）
+    3. 夏普比率（Sharpe Ratio）
+    4. 胜率（Win Rate）
+    5. 盈亏比（Profit/Loss Ratio）
+    6. 收益波动率
+    
+    你的判断标准：
+    - 夏普比率 < 1.0 的策略不值得执行
+    - 最大回撤 > 20% 的策略过于激进
+    - 胜率 < 40% 但盈亏比 > 3:1 可以接受
+    - 过去1年回测亏损的策略坚决拒绝
+    
+    你只认可经过数据验证的有效策略。没有回测数据支持的建议都是猜测。"""
+    
+    def __init__(self):
+        self.llm = get_llm()
+    
+    def create(self):
+        return Agent(
+            role=self.role,
+            goal=self.goal,
+            backstory=self.backstory,
+            llm=self.llm,
+            verbose=True,
+            allow_delegation=False
+        )
