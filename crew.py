@@ -6,12 +6,13 @@ CrewAI 主编排 - 多智能体炒股系统 v3.0
 新增: 市场状态判断、板块轮动分析、推荐追踪
 """
 from crewai import Crew, Process
-from agents import StockResearchAgent, RiskAgent, TradingAgent, MarketWatcher
+from agents import StockResearchAgent, RiskAgent, TradingAgent, MarketWatcher, ReviewAgent
 from tasks import (
     create_market_analysis_task,
     create_research_task,
     create_risk_task,
-    create_trading_task
+    create_trading_task,
+    create_review_task
 )
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import data_fetcher as df
@@ -181,15 +182,16 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
     print("[完成]\n")
     
     # 5. 创建 Agents
-    print("[4/8] 初始化 CrewAI Agents...")
+    print("[4/9] 初始化 CrewAI Agents...")
     market_watcher = MarketWatcher().create()
     researcher = StockResearchAgent().create()
     risk_mgr = RiskAgent().create()
     trader = TradingAgent().create()
+    reviewer = ReviewAgent().create()
     print("[完成]\n")
     
     # 6. 构建任务链
-    print("[5/8] 构建任务流水线...")
+    print("[5/9] 构建任务流水线...")
     
     market_task = create_market_analysis_task(market_watcher, market_data)
     
@@ -214,14 +216,23 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
         market="{{market_task.output}}"
     )
     trading_task.context = [risk_task]
+    
+    # 新增：审核任务
+    review_task = create_review_task(
+        reviewer,
+        trading_plan="{{trading_task.output}}",
+        risk_assessment="{{risk_task.output}}",
+        market_analysis="{{market_task.output}}"
+    )
+    review_task.context = [trading_task, risk_task, market_task]
     print("[完成]\n")
     
     # 7. 执行 Crew
-    print("[6/8] 启动 CrewAI 编排（顺序模式，约2-4分钟）...")
+    print("[6/9] 启动 CrewAI 编排（顺序模式，约3-5分钟）...")
     crew = Crew(
-        agents=[market_watcher, researcher, risk_mgr, trader],
-        tasks=[market_task, research_task, risk_task, trading_task],
-        process=Process.sequential,  # 优化：从 hierarchical 改为 sequential，速度提升 2-3 倍
+        agents=[market_watcher, researcher, risk_mgr, trader, reviewer],
+        tasks=[market_task, research_task, risk_task, trading_task, review_task],
+        process=Process.sequential,
         verbose=True
     )
     
@@ -229,8 +240,28 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
     result_str = str(result)
     print("[完成]\n")
     
-    # 8. 回测
-    print("[7/8] 对推荐股票进行历史回测...")
+    # 8. 检查审核结果
+    print("[7/9] 检查审核结果...")
+    if "❌" in result_str and "拒绝执行" in result_str:
+        print("\n" + "="*60)
+        print("  ⚠️  交易计划被审核 Agent 拒绝")
+        print("="*60 + "\n")
+        print(result_str)
+        print("\n建议：根据审核意见修改交易计划后重新运行\n")
+        
+        # 保存被拒绝的报告
+        rejected_report = f"# ⚠️ 交易计划被拒绝 - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        rejected_report += result_str
+        with open("result_rejected.md", "w", encoding="utf-8") as f:
+            f.write(rejected_report)
+        
+        notify_wechat(f"⚠️ 交易计划被审核拒绝\n\n{result_str[:500]}")
+        return rejected_report
+    else:
+        print("✅ 交易计划通过审核\n")
+    
+    # 9. 回测
+    print("[8/9] 对推荐股票进行历史回测...")
     backtest_text = ""
     if with_backtest:
         import re
@@ -241,8 +272,8 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
             print(backtest_text)
     print("[完成]\n")
     
-    # 9. 保存推荐记录
-    print("[8/8] 保存推荐记录...")
+    # 10. 保存推荐记录
+    print("[9/9] 保存推荐记录...")
     try:
         stocks = rt.parse_trading_result(result_str)
         if stocks:

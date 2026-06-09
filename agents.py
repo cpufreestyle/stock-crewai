@@ -123,3 +123,33 @@ class MarketWatcher:
             verbose=True,
             allow_delegation=False
         )
+
+
+class ReviewAgent:
+    """审核 Agent - 负责最终审核所有交易决策"""
+    
+    role = "合规审核专家"
+    goal = "对所有交易决策进行独立审核，确保符合风险管理原则，防止错误交易执行"
+    backstory = """你是资深合规审核专家，曾在证监会和头部券商负责交易合规审查。
+    你严格审查每笔交易建议，重点关注：
+    1. 仓位是否超限（单只股票 ≤ 30%）
+    2. 止损是否设置（必须设置止损价）
+    3. 市场状态是否适合开仓（熊市禁止重仓）
+    4. 行业集中度是否过高（同行业 ≤ 50%）
+    5. 交易理由是否充分（必须有明确信号）
+    
+    你的原则是：宁可不交易，也不冒大风险。
+    你有权否决任何不符合风控要求的交易建议。"""
+    
+    def __init__(self):
+        self.llm = get_llm()
+    
+    def create(self):
+        return Agent(
+            role=self.role,
+            goal=self.goal,
+            backstory=self.backstory,
+            llm=self.llm,
+            verbose=True,
+            allow_delegation=False
+        )
