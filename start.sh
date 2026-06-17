@@ -29,22 +29,20 @@ else
     echo "[WARN] headroom proxy 未响应，将以 passthrough 模式继续..."
 fi
 
-# CMD from docker-compose is: ["python", "run_virtual_v4.py", "--loop"]
-# We exec 'python /app/run_virtual_v4.py' directly, so filter out 'python' + 'run_virtual_v4.py'
-# then pass remaining args (e.g. --loop)
-FILTERED=""
+# docker-compose command 示例: ["python", "main.py", "--dashboard"]
+# 或: ["python", "run_virtual_v4.py", "--loop"]
+# 去掉开头的 "python"，将剩余参数作为完整命令执行
+ARGS=()
 SKIP_NEXT=0
 for arg in "$@"; do
-    if [ $SKIP_NEXT -eq 1 ]; then
-        SKIP_NEXT=0
-        continue
-    fi
     if [ "$arg" = "python" ]; then
-        SKIP_NEXT=1
         continue
     fi
-    FILTERED="$FILTERED $arg"
+    ARGS+=("$arg")
 done
 
-echo "[START] 启动 stock-crewai$FILTERED..."
-exec python /app/run_virtual_v4.py$FILTERED
+SCRIPT="${ARGS[0]:-/app/run_virtual_v4.py}"
+REST_ARGS=("${ARGS[@]:1}")
+
+echo "[START] 启动: python $SCRIPT ${REST_ARGS[*]}..."
+exec python "$SCRIPT" "${REST_ARGS[@]}"

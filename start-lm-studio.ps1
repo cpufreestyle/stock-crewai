@@ -1,4 +1,4 @@
-# LM Studio 自动启动脚本
+﻿# LM Studio 自动启动脚本
 # 确保 gemma-4-12b-it 模型推理服务就绪
 
 $lmStudioShortcut = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\LM Studio.lnk"

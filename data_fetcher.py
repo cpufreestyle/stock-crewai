@@ -21,9 +21,8 @@ for _k in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy'
     os.environ.pop(_k, None)
 
 # 强制 requests 绕过系统代理（Clash PAC 会让国内站点也走代理，导致 SSL 错误）
-import requests
-from retry_utils import api_retry
-_orig_merge = requests.Session.merge_environment_settings
+import requests as _req
+_orig_merge = _req.Session.merge_environment_settings
 
 def _patched_merge(self, url, proxies, stream, verify, cert):
     # 始终忽略系统代理，直接连接
@@ -31,14 +30,23 @@ def _patched_merge(self, url, proxies, stream, verify, cert):
     settings['proxies'] = {}
     return settings
 
-requests.Session.merge_environment_settings = _patched_merge
+_req.Session.merge_environment_settings = _patched_merge
 
-import akshare as ak
+# 惰性加载 akshare — 仅在使用时才导入，不阻塞模块加载
+class _AkLazy:
+    """akshare 惰性加载器。未安装 akshare 时不会报错，调用时才会抛 ImportError。"""
+    def __getattr__(self, name):
+        import akshare as _ak_module
+        setattr(self, name, getattr(_ak_module, name))
+        return getattr(self, name)
+
+ak = _AkLazy()
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 import time as _time
 import requests
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -100,9 +108,76 @@ def get_index_components(symbol: str = "000300") -> pd.DataFrame:
     return pd.DataFrame(A_SHARE_POOL)
 
 
+def _sina_kline_direct(stock_code: str, period: str = "daily",
+                       start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    """纯 requests 直接获取新浪 K 线数据（无需 akshare）
+
+    使用新浪财经 CN_MarketData.getKLineData 接口
+    """
+    # sz/sh 前缀
+    if stock_code.startswith(('6', '9')):
+        symbol = f"sh{stock_code}"
+    else:
+        symbol = f"sz{stock_code}"
+
+    # scale: 240=日k, 1200=周k, 7200=月k
+    scale_map = {"daily": "240", "weekly": "1200", "monthly": "7200"}
+    scale = scale_map.get(period, "240")
+    datalen = 250  # 获取250条数据
+
+    url = (f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+           f"CN_MarketData.getKLineData?symbol={symbol}&scale={scale}&ma=no&datalen={datalen}")
+    headers = {
+        'Referer': 'https://finance.sina.com.cn',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.encoding = 'utf-8'
+        data = json.loads(r.text)
+        if not data or not isinstance(data, list):
+            return pd.DataFrame()
+
+        rows = []
+        for item in data:
+            d = item.get('day', '')
+            if not d:
+                continue
+            rows.append({
+                '日期': d[:10],
+                '开盘': float(item.get('open', 0)),
+                '收盘': float(item.get('close', 0)),
+                '最高': float(item.get('high', 0)),
+                '最低': float(item.get('low', 0)),
+                '成交量': float(item.get('volume', 0)),
+                '成交额': 0.0,
+            })
+
+        if not rows:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(rows)
+        df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y-%m-%d')
+
+        # 日期过滤
+        if start_date:
+            sd = start_date.replace('-', '')
+            df = df[df['日期'].str.replace('-', '') >= sd]
+        if end_date:
+            ed = end_date.replace('-', '')
+            df = df[df['日期'].str.replace('-', '') <= ed]
+
+        df = df.sort_values('日期').reset_index(drop=True)
+        return df
+    except Exception as e:
+        print(f"[数据] {stock_code} 新浪直连K线失败: {e}")
+        return pd.DataFrame()
+
+
 def get_stock_price(stock_code: str, period: str = "daily",
                     start_date: str = None, end_date: str = None) -> pd.DataFrame:
-    """获取股票行情（新浪财经优先，东方财富降级）"""
+    """获取股票行情（新浪直连优先 → AkShare 新浪 → AkShare 东方财富）"""
     import time as _time
 
     # 日期格式
@@ -115,9 +190,17 @@ def get_stock_price(stock_code: str, period: str = "daily",
     else:
         em_start = start_date.replace("-", "")
 
-    # --- 数据源1: AkShare 新浪财经源（稳定直连，不受代理影响） ---
+    # --- 数据源0: 新浪直连 K 线接口（无需 akshare，最稳定） ---
+    try:
+        df = _sina_kline_direct(stock_code, period, start_date, end_date)
+        if df is not None and not df.empty:
+            print(f"[数据] {stock_code} 新浪直连K线获取{len(df)}条")
+            return df
+    except Exception as e:
+        print(f"[数据] {stock_code} 新浪直连K线异常: {e}")
+
+    # --- 数据源1: AkShare 新浪财经源（降级，需 akshare） ---
     period_map = {"daily": "daily", "weekly": "weekly", "monthly": "monthly"}
-    # 新浪源需要 sz/sh 前缀
     if stock_code.startswith(('6', '9')):
         sina_code = f"sh{stock_code}"
     else:
@@ -133,10 +216,10 @@ def get_stock_price(stock_code: str, period: str = "daily",
                 if "日期" in df.columns:
                     df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y-%m-%d")
                 df = df.sort_values("日期").reset_index(drop=True)
-                print(f"[数据] {stock_code} 新浪获取{len(df)}条")
+                print(f"[数据] {stock_code} 新浪(ak)获取{len(df)}条")
                 return df
         except Exception as e:
-            print(f"[数据] {stock_code} 新浪 attempt={attempt} 失败: {e}")
+            print(f"[数据] {stock_code} 新浪(ak) attempt={attempt} 失败: {e}")
             if attempt < 1:
                 _time.sleep(2)
 
@@ -188,7 +271,39 @@ def get_batch_stock_prices(codes: List[str], max_workers: int = 5) -> Dict[str, 
 
 
 def get_stock_info(stock_code: str) -> Dict:
-    """获取股票基本信息"""
+    """获取股票基本信息（新浪直连优先）"""
+    # 新浪直连接口
+    try:
+        if stock_code.startswith(('6', '9')):
+            symbol = f"sh{stock_code}"
+        else:
+            symbol = f"sz{stock_code}"
+        url = f"https://hq.sinajs.cn/list={symbol}"
+        headers = {
+            'Referer': 'https://finance.sina.com.cn',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        r = requests.get(url, headers=headers, timeout=10)
+        r.encoding = 'gbk'
+        if '=' in r.text and '"' in r.text:
+            data_str = r.text.split('="')[1].rstrip('";\n')
+            parts = data_str.split(',')
+            if len(parts) >= 32:
+                return {
+                    '股票简称': parts[0],
+                    '开盘价': parts[1],
+                    '昨收': parts[2],
+                    '当前价': parts[3],
+                    '最高': parts[4],
+                    '最低': parts[5],
+                    '成交量(手)': parts[8],
+                    '成交额(万)': parts[9],
+                    '日期': parts[30],
+                    '时间': parts[31],
+                }
+    except Exception as e:
+        print(f"[数据] {stock_code} 新浪基本信息失败: {e}")
+    # 降级 akshare
     try:
         df = ak.stock_individual_info_em(symbol=stock_code)
         info = dict(zip(df["item"].tolist(), df["value"].tolist()))
@@ -257,7 +372,11 @@ def get_market_regime(index_code: str = "000001", days: int = 120) -> Dict:
         end_date = datetime.now().strftime("%Y%m%d")
         start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
         
-        idx_df = ak.stock_zh_index_daily(symbol=f"sh{index_code}")
+        idx_df = _sina_kline_direct(index_code, "daily",
+                                      (datetime.now() - timedelta(days=days+30)).strftime("%Y-%m-%d"),
+                                      datetime.now().strftime("%Y-%m-%d"))
+        if idx_df is None or idx_df.empty:
+            idx_df = ak.stock_zh_index_daily(symbol=f"sh{index_code}")
         
         # 取最近的数据
         idx_df = idx_df.tail(days)
@@ -437,7 +556,6 @@ def calculate_technical(df: pd.DataFrame) -> Dict:
 
 
 @cached(ttl=10, cache_instance=realtime_cache)
-@api_retry
 def get_realtime_quotes(stock_codes: List[str]) -> List[Dict]:
     """获取实时行情（新浪接口）
     
@@ -528,7 +646,6 @@ def get_realtime_quotes(stock_codes: List[str]) -> List[Dict]:
 
 
 @cached(ttl=10, cache_instance=realtime_cache)
-@api_retry
 def get_sina_realtime(codes: List[str]) -> Dict[str, Dict]:
     """获取实时行情（兼容 run_virtual_v4.py 格式）
     
@@ -556,7 +673,6 @@ def get_sina_realtime(codes: List[str]) -> Dict[str, Dict]:
 
 
 @cached(ttl=300, cache_instance=market_cache)
-@api_retry
 def get_simple_market_regime() -> str:
     """简单市场状态判断（兼容 run_virtual_v4.py 格式）
     

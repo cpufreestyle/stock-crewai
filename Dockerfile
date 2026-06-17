@@ -1,7 +1,7 @@
-FROM python:3.11-slim
+FROM docker.m.daocloud.io/library/python:3.11-slim
 
 LABEL maintainer="cpufreestyle"
-LABEL description="Stock CrewAI - A股虚拟盘自动交易系统 (with headroom compression)"
+LABEL description="Stock CrewAI - A股虚拟盘自动交易系统 (Dashboard minimal)"
 
 # 设置时区为上海
 ENV TZ=Asia/Shanghai
@@ -10,23 +10,24 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tzdata \
-    && rm -rf /var/lib/apt/lists/*
+# 仅安装 Dashboard 和 Agent 框架所需的最小依赖
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ \
+    flask flask-cors flask-compress apscheduler \
+    pandas python-dotenv requests pydantic
 
-# 复制依赖文件并安装
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# 安装 headroom（token压缩）和 fastapi（proxy模式）+ httpx http2 支持
-RUN pip install --no-cache-dir headroom-ai fastapi "httpx[http2]"
-
-# 复制项目代码
+# 复制项目代码（含多 Agent 结构）
+RUN mkdir -p /app/core /app/agents /app/tools /app/workflows /app/templates /app/static
 COPY *.py .
+COPY core/ core/
+COPY agents/ agents/
+COPY tools/ tools/
+COPY workflows/ workflows/
+COPY templates/ templates/
+COPY static/ static/
 COPY portfolio.json.example portfolio.json.example
 COPY start.sh .
 RUN chmod +x start.sh
+COPY .env.example .env.example
 
 # 创建数据目录
 RUN mkdir -p /app/history /app/data /var/log
@@ -34,8 +35,5 @@ RUN mkdir -p /app/history /app/data /var/log
 # 数据卷挂载点
 VOLUME ["/app/history", "/app/data"]
 
-# 默认命令：启动 headroom proxy 后运行主程序
-ENTRYPOINT ["bash", "start.sh"]
-
-# 默认参数：单次运行模式
-CMD ["python", "run_virtual_v4.py"]
+# 默认命令
+CMD ["python", "main.py", "--dashboard"]
