@@ -36,7 +36,7 @@ services:
     profiles:
       - analyst
 
-  # Web Dashboard（交易监控面板）
+  # Web Dashboard（多 Agent 监控面板）
   web-dashboard:
     build: .
     container_name: web-dashboard
@@ -54,4 +54,5 @@ services:
       - PYTHONUNBUFFERED=1
     ports:
       - "5000:5000"
-    command: ["python", "web_dashboard.py"]
+    # 启动多 Agent 主入口（含 Scheduler）
+    command: ["python", "main.py", "--dashboard"]

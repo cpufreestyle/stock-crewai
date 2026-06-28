@@ -6,7 +6,7 @@ CrewAI 主编排 - 多智能体炒股系统 v3.0
 新增: 市场状态判断、板块轮动分析、推荐追踪
 """
 from crewai import Crew, Process
-from agents import StockResearchAgent, RiskAgent, TradingAgent, MarketWatcher
+from agents import ResearcherAgent, RiskManagerAgent, TraderAgent, MarketWatcherAgent
 from tasks import (
     create_market_analysis_task,
     create_research_task,
@@ -130,18 +130,18 @@ def run_backtest_for_picks(stock_codes: list) -> str:
 
 
 def notify_wechat(message: str):
-    """通过 openclaw 发送微信通知"""
+    """通过 openclaw 发送微信通知（静默失败，cron delivery 已接管通知）"""
     try:
-        # 使用 openclaw CLI 发送
-        import subprocess
+        import subprocess, shutil
+        if shutil.which("openclaw") is None:
+            return False  # 静默跳过，cron delivery 会处理
         result = subprocess.run(
             ["openclaw", "message", "send", "--channel", "wechat-access", "--message", message[:2000]],
             capture_output=True, text=True, timeout=30
         )
         return result.returncode == 0
-    except Exception as e:
-        print(f"[通知] 发送失败: {e}")
-        return False
+    except Exception:
+        return False  # 静默跳过
 
 
 def run_daily_analysis(with_backtest: bool = True) -> str:
@@ -182,10 +182,10 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
     
     # 5. 创建 Agents
     print("[4/8] 初始化 CrewAI Agents...")
-    market_watcher = MarketWatcher().create()
-    researcher = StockResearchAgent().create()
-    risk_mgr = RiskAgent().create()
-    trader = TradingAgent().create()
+    market_watcher = MarketWatcherAgent().create_crewai_agent()
+    researcher = ResearcherAgent().create_crewai_agent()
+    risk_mgr = RiskManagerAgent().create_crewai_agent()
+    trader = TraderAgent().create_crewai_agent()
     print("[完成]\n")
     
     # 6. 构建任务链
