@@ -11,6 +11,15 @@ updates:
       - dependency-name: transformers
       - dependency-name: torch
       - dependency-name: numpy
+      # pandas 3.x 有 breaking changes，限制在 2.x
+      - dependency-name: pandas
+        version-requirement: ">=2.0.0,<3.0.0"
+      # langchain-openai 1.x 有 breaking changes，限制在 0.x
+      - dependency-name: langchain-openai
+        version-requirement: ">=0.1.0,<1.0.0"
+      # akshare 大量 breaking changes，限制小幅升级
+      - dependency-name: akshare
+        version-requirement: ">=1.10.0,<2.0.0"
   - package-ecosystem: github-actions
     directory: /
     schedule:
