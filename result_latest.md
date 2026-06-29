@@ -1,67 +1,541 @@
-# 炒股分析报告 - 2026-06-16 14:40
+# 炒股分析报告 - 2026-06-26 14:39
 
-## 今日交易计划
-
-### 市场判断 + 建议仓位
-当前处于**震荡市**，策略核心是“防御为主、择优布局”，建议总仓位控制在 **40%-50%**，保留充足现金应对波动。
-
-### 推荐股票（按优先级，最多3只）
-
-| 代码 | 名称 | 买入价 | 仓位% | 止损价 | 止盈价 | 周期 | 核心逻辑 |
-|------|------|--------|-------|--------|--------|------|----------|
-| 000001 | 平安银行 | 10.76 | 15% | 9.43 | 12.30 | 中长 | 低波动压舱石，防御性强，抗风险能力高。 |
-| 000651 | 格力电器 | 37.70 | 15% | 36.00 | 41.50 | 中期 | 大市值蓝筹，横盘突破逻辑，稳健型配置。 |
-| 000895 | 双汇发展 | 24.00 | 10% | 22.30 | 27.80 | 短中 | 高弹性品种，博取震荡市中的超额收益。 |
-
-### 风险提示
-1. **硬止损警示：** 在震荡市中，一旦触发上述“止损价”，必须无视基本面逻辑立即执行减仓，严禁扛单。
-2. **流动性预警：** 若市场成交量持续萎缩且出现破位信号，需立即将总仓位降至30%以下以防范系统性风险。
-
-### 操作纪律
-- 严格执行止损
-- 分批买入
-- 达到止盈分批卖出
-
-
-=== 推荐股票回测 ===
-
-000895:
-  买入持有: 收益=-12.91% 回撤=N/A 胜率=N/A 持仓=否
-  均线策略: 收益=-3.69% 回撤=N/A 胜率=N/A 持仓=否
-  RSI策略: 收益=-8.24% 回撤=N/A 胜率=N/A 持仓=否
-  最佳策略: 均线策略 (-3.69%)
-
-000001:
-  买入持有: 收益=4.24% 回撤=N/A 胜率=N/A 持仓=是
-  均线策略: 收益=0.78% 回撤=N/A 胜率=N/A 持仓=是
-  RSI策略: 收益=5.08% 回撤=N/A 胜率=N/A 持仓=是
-  最佳策略: RSI策略 (5.08%)
-
-000651:
-  买入持有: 收益=-2.97% 回撤=N/A 胜率=N/A 持仓=否
-  均线策略: 收益=-4.55% 回撤=N/A 胜率=N/A 持仓=否
-  RSI策略: 收益=7.07% 回撤=N/A 胜率=N/A 持仓=是
-  最佳策略: RSI策略 (7.07%)
+<|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
+<channel|><|channel>thought
 
 ---
 === 每日风险报告 ===
 
-总仓位: 82.1%
-现金: 17236.00元
-持仓市值: 79172.00元
+总仓位: 56.0%
+现金: 41886.00元
+持仓市值: 52785.00元
 
 → 当前震荡市，建议仓位≤50%
 ⚠ 当前仓位超过建议上限，建议减仓至50%以下
 
 持仓止损检查:
-  603799 华友钴业: 成本58.52元, 止损53.84元 (8.0%风险)
-  000425 徐工机械: 成本9.51元, 止损8.75元 (8.0%风险)
-  000100 TCL科技: 成本4.38元, 止损3.95元 (9.8%风险)
   000651 格力电器: 成本38.53元, 止损35.45元 (8.0%风险)
+  000001 平安银行: 成本10.81元, 止损9.59元 (11.3%风险)
+  000002 万科A: 成本3.07元, 止损2.71元 (11.7%风险)
+  000063 中兴通讯: 成本38.11元, 止损35.36元 (7.2%风险)
+  000333 美的集团: 成本78.14元, 止损70.38元 (9.9%风险)
+  000100 TCL科技: 成本5.34元, 止损4.91元 (8.1%风险)
 
 ---
-当前持仓（总资产: 96408.00元, 总收益: -3.59%, 现金: 17236.00元）:
-  603799 华友钴业: 300股 @ 58.52元, 现价58.52元 (+0.00%), 止损=53.84, 止盈=70.22
-  000425 徐工机械: 1800股 @ 9.51元, 现价9.51元 (+0.00%), 止损=8.75, 止盈=11.41
-  000100 TCL科技: 8400股 @ 4.38元, 现价4.38元 (+0.00%), 止损=3.95, 止盈=5.03
+当前持仓（总资产: 94179.00元, 总收益: -5.82%, 现金: 41886.00元）:
   000651 格力电器: 200股 @ 38.53元, 现价38.53元 (+0.00%), 止损=35.45, 止盈=44.69
+  000001 平安银行: 400股 @ 10.81元, 现价10.81元 (+0.00%), 止损=9.59, 止盈=12.09
+  000002 万科A: 500股 @ 3.07元, 现价3.07元 (+0.00%), 止损=2.71, 止盈=3.42
+  000063 中兴通讯: 400股 @ 38.11元, 现价38.11元 (+0.00%), 止损=35.36, 止盈=44.59
+  000333 美的集团: 300股 @ 78.14元, 现价78.14元 (+0.00%), 止损=70.38, 止盈=88.74
+  000100 TCL科技: 100股 @ 5.34元, 现价5.34元 (+0.00%), 止损=4.91, 止盈=6.19

@@ -6,12 +6,16 @@ CrewAI 主编排 - 多智能体炒股系统 v3.0
 新增: 市场状态判断、板块轮动分析、推荐追踪
 """
 from crewai import Crew, Process
-from agents import ResearcherAgent, RiskManagerAgent, TraderAgent, MarketWatcherAgent
+from agents import (ResearcherAgent, RiskManagerAgent, TraderAgent, MarketWatcherAgent,
+                                SentimentAgent, BacktestAgent, PortfolioRebalancerAgent)
 from tasks import (
     create_market_analysis_task,
     create_research_task,
     create_risk_task,
-    create_trading_task
+    create_trading_task,
+    create_sentiment_task,
+    create_backtest_task,
+    create_rebalance_task,
 )
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import data_fetcher as df
@@ -186,6 +190,10 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
     researcher = ResearcherAgent().create_crewai_agent()
     risk_mgr = RiskManagerAgent().create_crewai_agent()
     trader = TraderAgent().create_crewai_agent()
+    # 新增 Agent
+    sentiment_analyst = SentimentAgent().create_crewai_agent()
+    backtest_validator = BacktestAgent().create_crewai_agent()
+    rebalancer = PortfolioRebalancerAgent().create_crewai_agent()
     print("[完成]\n")
     
     # 6. 构建任务链
@@ -214,13 +222,37 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
         market="{{market_task.output}}"
     )
     trading_task.context = [risk_task]
+
+    # 新增任务（在 research_task 之后、risk_task 之前插入情绪分析和回测）
+    sentiment_task = create_sentiment_task(
+        sentiment_analyst,
+        stock_picks="{{research_task.output}}"
+    )
+    sentiment_task.context = [research_task]
+
+    backtest_task = create_backtest_task(
+        backtest_validator,
+        stock_picks="{{sentiment_task.output}}"
+    )
+    backtest_task.context = [sentiment_task]
+
+    # 修改 risk_task 依赖
+    risk_task.context = [backtest_task]
+
+    # 在 trading_task 之后添加调仓任务
+    rebalance_task = create_rebalance_task(
+        rebalancer,
+        trade_plan="{{trading_task.output}}",
+        market_state="{{market_task.output}}"
+    )
+    rebalance_task.context = [trading_task]
     print("[完成]\n")
     
     # 7. 执行 Crew
     print("[6/8] 启动 CrewAI 编排（顺序模式，约2-4分钟）...")
     crew = Crew(
-        agents=[market_watcher, researcher, risk_mgr, trader],
-        tasks=[market_task, research_task, risk_task, trading_task],
+        agents=[market_watcher, researcher, sentiment_analyst, backtest_validator, risk_mgr, trader, rebalancer],
+        tasks=[market_task, research_task, sentiment_task, backtest_task, risk_task, trading_task, rebalance_task],
         process=Process.sequential,  # 优化：从 hierarchical 改为 sequential，速度提升 2-3 倍
         verbose=True
     )

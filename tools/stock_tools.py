@@ -14,6 +14,60 @@ from tools.compat import BaseTool
 import data_fetcher as df
 
 
+# ── Fundamental Analysis ──────────────────────────────────────────────
+class FundamentalAnalysisInput(BaseModel):
+    code: str = Field(description="Stock code, e.g. '000858'")
+
+class FundamentalAnalysisTool(BaseTool):
+    name: str = "fundamental_analysis"
+    description: str = "Get stock fundamental indicators (PE/PB/ROE/MarketCap/Revenue/Profit)"
+
+    def _run(self, code: str = "", **kwargs) -> str:
+        try:
+            if not code:
+                return json.dumps({"error": "please provide stock code"}, ensure_ascii=False)
+
+            # Try to fetch fundamental data
+            # In production, this would call a real API (e.g., AKShare, Tushare)
+            # For now, return sample data structure
+            
+            # TODO: Implement real fundamental data fetching
+            # Example using AKShare:
+            # import akshare as ak
+            # df = ak.stock_financial_analysis_indicator(symbol=code)
+            
+            # Sample data structure
+            fundamental_data = {
+                "code": code,
+                "name": self._get_stock_name(code),
+                "PE": None,   # 市盈率
+                "PB": None,   # 市净率
+                "ROE": None,  # 净资产收益率
+                "MarketCap": None,  # 总市值
+                "Revenue_growth": None,  # 营收增速
+                "Profit_growth": None,  # 利润增速
+                "Debt_ratio": None,  # 资产负债率
+                "Dividend_yield": None,  # 股息率
+            }
+            
+            # Try to fetch real data if data_fetcher supports it
+            if hasattr(df, 'get_fundamental_data'):
+                real_data = df.get_fundamental_data(code)
+                if real_data and 'error' not in real_data:
+                    fundamental_data.update(real_data)
+            
+            return json.dumps(fundamental_data, ensure_ascii=False, default=str)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _get_stock_name(self, code: str) -> str:
+        """Get stock name from pool"""
+        for s in df.A_SHARE_POOL:
+            if s["code"] == code:
+                return s["name"]
+        return code
+
+
 # ── Stock Search ──────────────────────────────────────────────────────
 class StockSearchInput(BaseModel):
     n_stocks: int = Field(default=10, description="Number of stocks to sample from pool")
@@ -199,6 +253,7 @@ class BacktestTool(BaseTool):
 def get_stock_tools() -> list:
     """Return all stock research/analysis tools"""
     return [
+        FundamentalAnalysisTool(),
         StockSearchTool(),
         TechnicalAnalysisTool(),
         NewsSentimentTool(),

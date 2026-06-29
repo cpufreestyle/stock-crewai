@@ -123,3 +123,39 @@ def create_trading_task(trading_agent, research: str, risk: str, market: str) ->
         agent=trading_agent,
         expected_output="最终交易计划（Markdown表格格式）"
     )
+
+
+def create_sentiment_task(sentiment_agent, stock_picks: str) -> Task:
+    """情绪分析任务"""
+    return Task(
+        description=f"""对候选股票进行情绪分析：
+        候选股票：{stock_picks}
+        请分析每只股票的新闻情绪和社交媒体情绪，给出情绪评分（0-100）。
+        识别情绪极值带来的交易机会。""",
+        agent=sentiment_agent,
+        expected_output="情绪分析报告，包含每只股票的情绪评分和交易建议"
+    )
+
+
+def create_backtest_task(backtest_agent, stock_picks: str) -> Task:
+    """回测验证任务"""
+    return Task(
+        description=f"""对候选股票进行历史回测验证：
+        候选股票：{stock_picks}
+        请对每只股票运行多策略回测，验证其历史表现。
+        为风控审核提供数据支持。""",
+        agent=backtest_agent,
+        expected_output="回测验证报告，包含每只股票的回测评分和策略表现"
+    )
+
+
+def create_rebalance_task(rebalancer_agent, trade_plan: str, market_state: str) -> Task:
+    """动态调仓任务"""
+    return Task(
+        description=f"""根据市场变化和持仓表现，动态调整仓位：
+        交易计划：{trade_plan}
+        市场状态：{market_state}
+        请分析是否需要止损、止盈或调仓。谨慎执行明确的止损/止盈操作。""",
+        agent=rebalancer_agent,
+        expected_output="动态调仓报告，包含建议的操作和已执行的操作"
+    )

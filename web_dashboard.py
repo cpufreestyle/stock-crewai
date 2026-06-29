@@ -138,6 +138,33 @@ def api_dashboard():
             "return_pct": portfolio.get("total_return_pct", 0),
         }]
 
+    # 自动更新今日净值（若不存在则追加）
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_record = None
+    for record in performance:
+        if record.get("date") == today_str:
+            today_record = record
+            break
+    
+    current_value = portfolio.get("total_value", 100000)
+    current_return = portfolio.get("total_return_pct", 0)
+    
+    if today_record:
+        # 更新今日记录
+        today_record["value"] = current_value
+        today_record["return_pct"] = current_return
+    else:
+        # 追加今日记录
+        performance.append({
+            "date": today_str,
+            "value": current_value,
+            "return_pct": current_return
+        })
+    
+    # 写回文件
+    with open(history_file, "w", encoding="utf-8") as f:
+        json.dump(performance, f, ensure_ascii=False, indent=2)
+    
     # 量化指标（带缓存）
     quant_key = "quant_metrics"
     quant_data, quant_hit = _cache_get(quant_key)

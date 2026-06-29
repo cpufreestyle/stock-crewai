@@ -148,6 +148,38 @@ class StateStore:
     def set_trade_plan(self, plan: Dict) -> None:
         self.set("trade_plan", plan)
 
+    # ── 新增：情绪分析 ────────────────────────────────────────
+
+    def get_sentiment_analysis(self) -> Dict:
+        return self.get("sentiment_analysis", {})
+
+    def set_sentiment_analysis(self, analysis: Dict) -> None:
+        self.set("sentiment_analysis", analysis)
+
+    # ── 新增：回测结果 ────────────────────────────────────────
+
+    def get_backtest_results(self) -> List[Dict]:
+        return self.get("backtest_results", [])
+
+    def set_backtest_results(self, results: List[Dict]) -> None:
+        self.set("backtest_results", results)
+
+    # ── 新增：调仓计划 ────────────────────────────────────────
+
+    def get_rebalance_plan(self) -> Dict:
+        return self.get("rebalance_plan", {})
+
+    def set_rebalance_plan(self, plan: Dict) -> None:
+        self.set("rebalance_plan", plan)
+
+    # ── 新增：宏观经济数据 ────────────────────────────────────
+
+    def get_macro_data(self) -> Dict:
+        return self.get("macro_data", {})
+
+    def set_macro_data(self, data: Dict) -> None:
+        self.set("macro_data", data)
+
     def get_performance_report(self) -> Dict:
         return self.get("performance_report", {})
 

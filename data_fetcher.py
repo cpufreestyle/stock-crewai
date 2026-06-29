@@ -101,6 +101,59 @@ A_SHARE_POOL = [
     {"code": "603799", "name": "华友钴业", "sector": "有色金属"},
     {"code": "603986", "name": "兆易创新", "sector": "半导体"},
 ]
+# Code -> name lookup built from A_SHARE_POOL
+_STOCK_NAME = {
+    "000001": "平安银行",
+    "000002": "万科A",
+    "000063": "中兴通讯",
+    "000100": "TCL科技",
+    "000333": "美的集团",
+    "000425": "徐工机械",
+    "000651": "格力电器",
+    "000858": "五粮液",
+    "000876": "新希望",
+    "000895": "双汇发展",
+    "000938": "紫光股份",
+    "002001": "新和成",
+    "002024": "苏宁易购",
+    "002415": "海康威视",
+    "002475": "立讯精密",
+    "002594": "比亚迪",
+    "002714": "牧原股份",
+    "600009": "上海机场",
+    "600016": "民生银行",
+    "600019": "宝钢股份",
+    "600028": "中国石化",
+    "600030": "中信证券",
+    "600036": "招商银行",
+    "600048": "保利发展",
+    "600050": "中国联通",
+    "600104": "上汽集团",
+    "600276": "恒瑞医药",
+    "600309": "万华化学",
+    "600519": "贵州茅台",
+    "600887": "伊利股份",
+    "600900": "长江电力",
+    "601006": "大秦铁路",
+    "601012": "隆基绿能",
+    "601088": "中国神华",
+    "601118": "海南橡胶",
+    "601166": "兴业银行",
+    "601186": "中国铁建",
+    "601318": "中国平安",
+    "601398": "工商银行",
+    "601628": "中国人寿",
+    "601857": "中国石油",
+    "601888": "中国中免",
+    "601899": "紫金矿业",
+    "603259": "药明康德",
+    "603288": "海天味业",
+    "603501": "韦尔股份",
+    "603799": "华友钴业",
+    "603986": "兆易创新"
+}
+
+
 
 
 def get_index_components(symbol: str = "000300") -> pd.DataFrame:
@@ -556,93 +609,94 @@ def calculate_technical(df: pd.DataFrame) -> Dict:
 
 
 @cached(ttl=10, cache_instance=realtime_cache)
-def get_realtime_quotes(stock_codes: List[str]) -> List[Dict]:
-    """获取实时行情（新浪接口）
+def get_realtime_quotes(stock_codes: List[str], _retry: int = 2) -> List[Dict]:
+    """Get realtime quotes using Eastmoney single-stock API with retry.
     
-    Args:
-        stock_codes: 股票代码列表，如 ['000001', '600519']
-    
-    Returns:
-        [{code, name, price, change, change_pct, volume, amount, high, low, open, prev_close}, ...]
+    Tries push2.eastmoney.com first, falls back to push2his (K-line) on failure.
+    Prices in API are in cents (divide by 100).
     """
     if not stock_codes:
         return []
-    
-    # 添加 sh/sz 前缀（沪市6开头，深市0/3开头）
-    sina_codes = []
-    for c in stock_codes:
-        if c.startswith(("6", "9")):
-            sina_codes.append("sh" + c)
-        else:
-            sina_codes.append("sz" + c)
-    
-    # 新浪实时行情 API
-    codes_str = ','.join(sina_codes)
-    url = f"https://hq.sinajs.cn/list={codes_str}"
-    
+
     headers = {
-        'Referer': 'https://finance.sina.com.cn',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        "Referer": "https://quote.eastmoney.com",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
-    
-    try:
-        r = requests.get(url, headers=headers, timeout=10)
-        r.encoding = 'gbk'
-        
-        results = []
-        for line in r.text.strip().split('\n'):
-            if not line or '=' not in line:
-                continue
-            
-            # 解析: var hq_str_sz000333="美的集团,12.34,..."
-            parts = line.split('="')
-            if len(parts) != 2:
-                continue
-            
-            # 提取原始代码（去掉 sh/sz 前缀）
-            raw = parts[0]  # e.g. hq_str_sz000333
-            code_part = raw.split('_')[-1]  # e.g. sz000333
-            if code_part.startswith(('sh', 'sz')):
-                code = code_part[2:]  # 去掉 sh/sz，得到 000333
-            else:
-                continue
-            
-            data = parts[1].rstrip('";').split(',')
-            
-            if len(data) < 32:
-                continue
-            
-            name = data[0]
-            open_price = float(data[1]) if data[1] else 0
-            prev_close = float(data[2]) if data[2] else 0
-            price = float(data[3]) if data[3] else 0
-            high = float(data[4]) if data[4] else 0
-            low = float(data[5]) if data[5] else 0
-            volume = int(float(data[8])) if data[8] else 0
-            amount = float(data[9]) if data[9] else 0
-            
-            change = price - prev_close if prev_close > 0 else 0
-            change_pct = (change / prev_close * 100) if prev_close > 0 else 0
-            
-            results.append({
-                'code': code,
-                'name': name,
-                'price': round(price, 2),
-                'open': round(open_price, 2),
-                'high': round(high, 2),
-                'low': round(low, 2),
-                'prev_close': round(prev_close, 2),
-                'change': round(change, 2),
-                'change_pct': round(change_pct, 2),
-                'volume': volume,
-                'amount': round(amount, 2)
-            })
-        
-        return results
-        
-    except Exception as e:
-        print(f"获取实时行情失败: {e}")
-        return []
+    fields = "f43,f44,f45,f46,f47,f48,f57,f58,f60,f169,f170"
+
+    def _fetch_one(code: str) -> dict:
+        market = "1" if code.startswith(("6", "9")) else "0"
+        # Try push2 (realtime)
+        url = f"https://push2.eastmoney.com/api/qt/stock/get?secid={market}.{code}&fields={fields}"
+        for attempt in range(_retry):
+            try:
+                r = requests.get(url, headers=headers, timeout=4)
+                r.raise_for_status()
+                data = r.json().get("data", {})
+                if not data:
+                    continue
+                price = float(data.get("f43", 0) or 0) / 100
+                prev_close = float(data.get("f60", 0) or 0) / 100
+                open_price = float(data.get("f44", 0) or 0) / 100
+                high = float(data.get("f46", 0) or 0) / 100
+                low = float(data.get("f47", 0) or 0) / 100
+                change = float(data.get("f169", 0) or 0) / 100
+                change_pct = float(data.get("f170", 0) or 0) / 100
+                if price <= 0:
+                    continue
+                return {
+                    "code": data.get("f57", code),
+                    "name": data.get("f58") or _STOCK_NAME.get(code, code),
+                    "price": round(price, 2),
+                    "open": round(open_price, 2),
+                    "high": round(high, 2),
+                    "low": round(low, 2),
+                    "prev_close": round(prev_close, 2),
+                    "change": round(change, 2),
+                    "change_pct": round(change_pct, 2),
+                    "volume": 0,
+                    "amount": 0
+                }
+            except Exception:
+                if attempt < _retry - 1:
+                    import time; time.sleep(0.2)
+        # Fallback: use Sina K-line to get latest daily candle
+        try:
+            sinabase = "sh" + code if code.startswith(("6", "9")) else "sz" + code
+            url2 = (f"https://money.finance.sina.com.cn/quotes_service/api/json_v2.php"
+                     f"/CN_MarketData.getKLineData?symbol={sinabase}&scale=240&ma=no&datalen=2")
+            r2 = requests.get(url2, headers={"User-Agent": "Mozilla/5.0"}, timeout=4)
+            r2.raise_for_status()
+            candles = r2.json()
+            if candles and len(candles) >= 1:
+                latest = candles[-1]
+                price = float(latest.get("close", 0))
+                prev = float(candles[0].get("close", price)) if len(candles) >= 2 else price
+                open_p = float(latest.get("open", price))
+                high_p = float(latest.get("high", price))
+                low_p = float(latest.get("low", price))
+                change_p = price - prev
+                change_pct_p = (change_p / prev * 100) if prev > 0 else 0
+                return {
+                    "code": code, "name": _STOCK_NAME.get(code, code),
+                    "price": round(price, 2), "open": round(open_p, 2),
+                    "high": round(high_p, 2), "low": round(low_p, 2),
+                    "prev_close": round(prev, 2),
+                    "change": round(change_p, 2),
+                    "change_pct": round(change_pct_p, 2),
+                    "volume": 0, "amount": 0
+                }
+        except Exception:
+            pass
+        return None
+
+    results = []
+    for code in stock_codes:
+        q = _fetch_one(code)
+        if q:
+            results.append(q)
+    return results
+
 
 
 @cached(ttl=10, cache_instance=realtime_cache)
@@ -674,32 +728,23 @@ def get_sina_realtime(codes: List[str]) -> Dict[str, Dict]:
 
 @cached(ttl=300, cache_instance=market_cache)
 def get_simple_market_regime() -> str:
-    """简单市场状态判断（兼容 run_virtual_v4.py 格式）
-    
-    Returns:
-        "牛市" | "熊市" | "震荡市"
-    """
+    """Simple market regime detection using Eastmoney API"""
     try:
-        r = requests.get(
-            "https://hq.sinajs.cn/list=sh000300",
-            headers={"Referer": "https://finance.sina.com.cn"},
-            timeout=10
-        )
-        fields = r.text.split('"')[1].split(",")
-        if len(fields) >= 4:
-            current = float(fields[3])
-            last_close = float(fields[2])
-            change_pct = (current / last_close - 1) * 100 if last_close > 0 else 0
-            
+        url = "https://push2.eastmoney.com/api/qt/ulist.np/get?fltt=2&invt=2&fields=f43,f169,f170&secids=1.000300"
+        headers = {"Referer": "https://quote.eastmoney.com", "User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        diff = r.json().get("data", {}).get("diff", [])
+        if diff:
+            change_pct = float(diff[0].get("f170", 0) or 0)
             if change_pct > 1:
                 return "牛市"
             elif change_pct < -1:
                 return "熊市"
-            else:
-                return "震荡市"
-    except:
-        pass
-    return "震荡市"
+        return "震荡市"
+    except Exception as e:
+        print(f"[data] market_regime failed: {e}")
+        return "震荡市"
 
 
 if __name__ == "__main__":
