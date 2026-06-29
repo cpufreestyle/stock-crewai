@@ -70,3 +70,11 @@ docs/quick-reference.md
 
 # recommendations 历史 JSON
 recommendations/*.json
+
+# 备份文件
+*.bak
+
+# SQLite 临时文件
+*.db-shm
+*.db-wal
+*.db-journal
