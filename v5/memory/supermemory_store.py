@@ -88,11 +88,11 @@ def store_trading_decision(decision: Dict, context: str = ""):
 """
         sm.documents.add(
             content=content,
+            container_tag="stock-crewai",
             metadata={
                 "type": "trading_decision",
                 "stock_code": decision.get("stock_code", ""),
                 "action": decision.get("action", ""),
-                "container": "stock-crewai",
             }
         )
         logger.info(f"[Supermemory] stored decision for {decision.get('stock_code')}")
@@ -107,11 +107,22 @@ def recall_similar_decisions(query: str, limit: int = 5) -> List[Dict]:
         return []
     
     try:
-        results = sm.search.execute(
+        response = sm.search.execute(
             q=query,
             limit=limit,
-            container="stock-crewai",
+            container_tag="stock-crewai",
         )
+        results = []
+        if response and response.results:
+            for r in response.results:
+                results.append({
+                    "score": r.score,
+                    "title": r.title,
+                    "content": r.content or "",
+                    "metadata": r.metadata or {},
+                    "document_id": r.document_id,
+                    "chunks": r.chunks or [],
+                })
         logger.info(f"[Supermemory] recalled {len(results)} memories for: {query[:50]}")
         return results
     except Exception as e:
