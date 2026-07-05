@@ -1,32 +1,27 @@
 """
-TradingAgents v5 配置
-DeepSeek LLM + 2轮多空辩论 + ChromaDB 记忆
+stock-crewai v5.0 配置文件
+基于 LM Studio 本地模型 (Gemma 4 12B Coder)
 """
-import os
-from pathlib import Path
 
-# ── 路径 ──
-V5_ROOT = Path(__file__).parent
-PROJECT_ROOT = V5_ROOT.parent
-DATA_DIR = V5_ROOT / "data"
-MEMORY_DIR = DATA_DIR / "trading_memory"
+# ── LM Studio 本地模型配置 ──
+LM_STUDIO_BASE_URL = "http://localhost:1234/v1"
+LM_STUDIO_API_KEY = "lm-studio"  # 占位符，LM Studio 不校验
 
-# ── LLM 配置 (DeepSeek) ──
+# 模型配置 - 分析师用 chat 模式，推理用 reasoner 模式
+# LM Studio 只加载一个模型，两个角色共用
 LLM_CONFIG = {
-    # 分析层用 chat 模型（便宜、快）
     "analyst": {
-        "model": "deepseek-chat",
-        "api_key": os.getenv("DEEPSEEK_API_KEY", ""),
-        "base_url": "https://api.deepseek.com/v1",
-        "temperature": 0.3,
+        "model": "gemma-4-12b-coder",  # LM Studio 中加载的模型名
+        "base_url": LM_STUDIO_BASE_URL,
+        "api_key": LM_STUDIO_API_KEY,
+        "temperature": 0.3,   # 分析需要确定性
         "max_tokens": 2048,
     },
-    # 决策层用 reasoner 模型（推理强）
     "reasoner": {
-        "model": "deepseek-reasoner",
-        "api_key": os.getenv("DEEPSEEK_API_KEY", ""),
-        "base_url": "https://api.deepseek.com/v1",
-        "temperature": 0.1,
+        "model": "gemma-4-12b-coder",
+        "base_url": LM_STUDIO_BASE_URL,
+        "api_key": LM_STUDIO_API_KEY,
+        "temperature": 0.6,   # 辩论需要一些创造性
         "max_tokens": 4096,
     },
 }
@@ -34,45 +29,78 @@ LLM_CONFIG = {
 # ── 辩论配置 ──
 DEBATE_ROUNDS = 2  # 多空辩论轮数
 
-# ── 数据源 ──
-DATA_SOURCES = {
-    # 保留原有新浪API（行情）
-    "sina": {
-        "realtime_url": "http://hq.sinajs.cn/",
-        "enabled": True,
-    },
-    # 新增 Tushare（基本面+新闻）
-    "tushare": {
-        "token": os.getenv("TUSHARE_TOKEN", ""),
-        "enabled": True,
-    },
-    # AkShare 备用
-    "akshare": {
-        "enabled": True,
-    },
-}
-
-# ── 候选股票池 ──
+# ── 股票池 ──
 STOCK_POOL = [
-    # 沪深300成分股（子集，与v4保持一致）
-    "000333", "000425", "000651", "000858", "002415",
-    "002594", "002714", "300015", "300033", "300059",
-    "300433", "300750", "600009", "600016", "600028",
-    "600030", "600036", "600048", "600050", "600089",
-    "600104", "600196", "600276", "600406", "600438",
-    "600519", "600585", "600588", "600690", "600745",
-    "600837", "600887", "601006", "601012", "601318",
-    "601398", "601601", "601628", "601668", "601728",
-    "601766", "601800", "601818", "601857", "601888",
-    "601919", "603259", "603288", "603501", "603799",
+    # 科技
+    "000333",  # 美的集团
+    "000725",  # 京东方A
+    "002415",  # 海康威视
+    "002475",  # 立讯精密
+    "300059",  # 东方财富
+    "300750",  # 宁德时代
+    "300760",  # 迈瑞医疗
+    "603259",  # 药明康德
+    "603986",  # 兆易创新
+    "688981",  # 中芯国际
+    # 消费
+    "000858",  # 五粮液
+    "600519",  # 贵州茅台
+    "600887",  # 伊利股份
+    "603288",  # 海天味业
+    # 金融
+    "601318",  # 中国平安
+    "601398",  # 工商银行
+    "601628",  # 中国人寿
+    "601939",  # 建设银行
+    # 新能源
+    "002594",  # 比亚迪
+    "601012",  # 隆基绿能
+    # 医药
+    "000538",  # 云南白药
+    "600276",  # 恒瑞医药
+    # 军工
+    "000768",  # 中航西飞
+    "600036",  # 招商银行
+    "600104",  # 上汽集团
+    # 半导体
+    "002049",  # 紫光国微
+    "300223",  # 北京君正
+    "300661",  # 圣邦股份
+    "688012",  # 中微公司
+    "688041",  # 海光信息
+    # AI/算力
+    "002230",  # 科大讯飞
+    "300474",  # 景嘉微
+    "688256",  # 寒武纪
+    # 更多
+    "000001",  # 平安银行
+    "000063",  # 中兴通讯
+    "000100",  # TCL科技
+    "000338",  # 潍柴动力
+    "000402",  # 金融街
+    "000568",  # 泸州老窖
+    "000651",  # 格力电器
+    "002007",  # 华兰生物
+    "002027",  # 分众传媒
+    "002230",  # 科大讯飞
+    "002241",  # 歌尔股份
+    "002304",  # 洋河股份
+    "002466",  # 天齐锂业
+    "002493",  # 荣盛石化
+    "300015",  # 爱尔眼科
+    "300124",  # 汇川技术
+    "600009",  # 上海机场
 ]
 
-# ── 运行参数 ──
-SCAN_INTERVAL_MINUTES = 10  # 扫描间隔
-MAX_POSITIONS = 5           # 最大持仓
-MAX_DEBATE_TOKENS = 4096   # 辩论最大 token
+# ── 扫描间隔 ──
+SCAN_INTERVAL_MINUTES = 10  # 循环模式间隔
 
-# ── 兼容 v4 的配置映射 ──
-# 导入原有配置
-import sys
-sys.path.insert(0, str(PROJECT_ROOT))
+# ── ChromaDB 配置 ──
+CHROMA_DB_PATH = "./v5/chroma_db"
+CHROMA_COLLECTION = "trading_decisions"
+
+# ── 风控参数 ──
+MAX_POSITION_RATIO = 0.20    # 单只最大仓位 20%
+MAX_TOTAL_POSITIONS = 5      # 最大持仓 5 只
+MIN_RISK_REWARD = 2.0        # 最低风险收益比
+STOP_LOSS_PCT = 0.05         # 默认止损 5%

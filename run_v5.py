@@ -226,10 +226,11 @@ def main():
     parser.add_argument("--stock", type=str, help="单只股票测试")
     args = parser.parse_args()
 
-    # 检查 API Key
-    if not os.getenv("DEEPSEEK_API_KEY"):
-        logger.error("请设置 DEEPSEEK_API_KEY 环境变量！")
-        logger.info("获取地址: https://platform.deepseek.com/")
+    # 检查 LM Studio 服务
+    from v5.agents.llm_client import check_lm_studio
+    if not check_lm_studio():
+        logger.error("LM Studio 未运行或未加载模型！")
+        logger.info("请：1) 打开 LM Studio  2) 加载 gemma-4-12b-coder 模型  3) 启动 Local Server (端口 1234)")
         sys.exit(1)
 
     if args.stock:
