@@ -67,6 +67,14 @@ LOG_MAX_BYTES = 10 * 1024 * 1024   # 日志文件最大 10MB
 LOG_BACKUP_COUNT = 5                # 保留 5 个备份
 
 # ========================
+# 熔断器
+# ========================
+CIRCUIT_BREAKER_DAILY_LOSS_PCT = 5     # 单日亏损超过 5% 触发熔断
+CIRCUIT_BREAKER_CONSECUTIVE_STOPS = 3  # 连续 3 次止损触发熔断
+CIRCUIT_BREAKER_COOLDOWN_MINUTES = 30  # 熔断冷却时间（分钟）
+CIRCUIT_BREAKER_FILE = "circuit_breaker_state.json"
+
+# ========================
 # 文件路径
 # ========================
 PORTFOLIO_FILE = "portfolio.json"

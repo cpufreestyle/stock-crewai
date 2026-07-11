@@ -98,7 +98,7 @@ class StockSearchTool(BaseTool):
                         sector = s["sector"]
                         break
 
-                change_pct = tech.get("5日涨跌", 0)
+                change_pct = tech.get("5日涨跌%", 0)
                 if not (min_change <= change_pct <= max_change):
                     continue
 
@@ -161,22 +161,26 @@ class TechnicalAnalysisTool(BaseTool):
                     name = s["name"]
                     break
 
+            ma5 = tech.get("MA5", 0)
+            ma20 = tech.get("MA20", 0)
+            trend = "多头" if ma5 and ma20 and ma5 > ma20 else "空头"
+
             return json.dumps({
                 "code": code,
                 "name": name,
                 "close": tech.get("收盘价"),
-                "MA5": tech.get("MA5"),
-                "MA10": tech.get("MA10"),
-                "MA20": tech.get("MA20"),
+                "current": tech.get("收盘价"),
+                "收盘价": tech.get("收盘价"),
+                "MA5": ma5,
+                "MA20": ma20,
+                "MA60": tech.get("MA60"),
                 "RSI": tech.get("RSI"),
-                "MACD": tech.get("MACD"),
-                "MACD_signal": tech.get("MACD_signal"),
-                "MACD_hist": tech.get("MACD_hist"),
-                "BOLL_upper": tech.get("BOLL_upper"),
-                "BOLL_mid": tech.get("BOLL_mid"),
-                "BOLL_lower": tech.get("BOLL_lower"),
-                "change_5d": tech.get("5日涨跌"),
-                "trend": "bullish" if tech.get("MA5", 0) > tech.get("MA20", 999) else "bearish",
+                "MACD直方图": tech.get("MACD直方图"),
+                "MACD信号": tech.get("MACD信号"),
+                "布林带位置%": tech.get("布林带位置%"),
+                "布林带信号": tech.get("布林带信号"),
+                "5日涨跌%": tech.get("5日涨跌%"),
+                "趋势": trend,
             }, ensure_ascii=False, default=str)
         except Exception as e:
             return json.dumps({"error": str(e)})

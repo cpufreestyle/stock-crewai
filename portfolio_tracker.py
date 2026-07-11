@@ -127,13 +127,15 @@ def update_position(
     return portfolio
 
 
-def set_stop_loss(stock_code: str, stop_loss: float, take_profit: float = 0):
+def set_stop_loss(stock_code: str, stop_loss: float, take_profit: float = 0) -> Dict:
     """设置止损止盈"""
     portfolio = load_portfolio()
-    if stock_code in portfolio["positions"]:
-        portfolio["positions"][stock_code]["stop_loss"] = stop_loss
-        portfolio["positions"][stock_code]["take_profit"] = take_profit
-        save_portfolio(portfolio)
+    if stock_code not in portfolio["positions"]:
+        return {"error": f"未持有 {stock_code}"}
+    portfolio["positions"][stock_code]["stop_loss"] = stop_loss
+    portfolio["positions"][stock_code]["take_profit"] = take_profit
+    save_portfolio(portfolio)
+    return {"success": True, "code": stock_code, "stop_loss": stop_loss, "take_profit": take_profit}
 
 
 def check_stop_loss(current_prices: dict = None) -> List[Dict]:

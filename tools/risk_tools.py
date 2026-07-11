@@ -67,6 +67,7 @@ class PositionSizeTool(BaseTool):
             return json.dumps({
                 "total_capital": total_capital,
                 "shares": result["shares"],
+                "买入股数": result["shares"],
                 "position_value": result["position_value"],
                 "position_pct": f"{result['position_pct']:.1f}%",
                 "risk_amount": result["risk_amount"],
@@ -100,7 +101,9 @@ class RiskRewardTool(BaseTool):
                 "risk": result["risk"],
                 "reward": result["reward"],
                 "risk_reward_ratio": f"{result['risk_reward_ratio']:.1f}:1",
-                "is_valid": "Yes" if result["is_valid"] else "No",
+                "风险收益比": f"{result['risk_reward_ratio']:.1f}:1",
+                "is_valid": "是" if result["is_valid"] else "否",
+                "是否可行": "是" if result["is_valid"] else "否",
                 "recommendation": result["recommendation"],
             }, ensure_ascii=False)
         except Exception as e:
@@ -166,6 +169,7 @@ class CircuitBreakerCheckTool(BaseTool):
 
             return json.dumps({
                 "can_trade": "Yes" if can_trade else "No (circuit breaker triggered)",
+                "是否允许交易": "是" if can_trade else "否（熔断器已触发）",
                 "consecutive_stops": cb._state.get("consecutive_stops", 0),
                 "is_tripped": cb._state.get("tripped", False),
                 "trip_reason": cb._state.get("trip_reason", ""),
@@ -197,6 +201,7 @@ class StopLossAdviceTool(BaseTool):
                 "entry_price": entry_price,
                 "strategy": strategy,
                 "stop_loss_price": result["stop_loss_price"],
+                "止损价": result["stop_loss_price"],
                 "stop_loss_pct": f"{result['stop_loss_pct']:.1f}%",
                 "max_loss_per_share": result["max_loss_per_share"],
             }, ensure_ascii=False)
