@@ -46,7 +46,7 @@ from config import (
 try:
     import wechat_notifier as wn
     NOTIFIER_AVAILABLE = True
-except:
+except Exception:
     NOTIFIER_AVAILABLE = False
     print("[警告] 通知模块不可用")
 
@@ -128,7 +128,7 @@ def cleanup_old_logs():
         for f in log_files[:-20]:
             try:
                 f.unlink()
-            except:
+            except Exception:
                 pass
     
     trade_files = sorted(history_dir.glob("trades_*.json"), key=lambda f: f.stat().st_mtime)
@@ -136,7 +136,7 @@ def cleanup_old_logs():
         for f in trade_files[:-30]:
             try:
                 f.unlink()
-            except:
+            except Exception:
                 pass
 
 
@@ -184,7 +184,7 @@ def check_portfolio_risk(portfolio_positions, realtime_data):
                             fixed_stop = round(current_price * STOP_LOSS_RATIO, 2)
                             if dynamic_stop_loss > fixed_stop:
                                 dynamic_stop_loss = fixed_stop
-            except:
+            except Exception:
                 pass
         
         # 使用更严格的止损线
@@ -267,7 +267,7 @@ def execute_sell(portfolio_positions, alerts, realtime_data):
             if NOTIFIER_AVAILABLE:
                 try:
                     wn.notify_sell(code, pos["name"], shares, price, pnl, alert["reason"])
-                except:
+                except Exception:
                     pass
     
     return sells
@@ -350,7 +350,7 @@ def advanced_filter(realtime_data, portfolio_positions, cash, total_capital):
                     # 布林带下轨加分
                     if analysis.get("bollinger_lower") and data["current"] <= analysis["bollinger_lower"]:
                         tech_score += 2
-            except:
+            except Exception:
                 pass
         
         # 市场状态调整
@@ -433,7 +433,7 @@ def execute_buy(candidates, portfolio_positions, cash, total_capital, realtime_d
                 else:
                     stop_loss = round(price * STOP_LOSS_RATIO, 2)
                     take_profit = round(price * TAKE_PROFIT_RATIO, 2)
-            except:
+            except Exception:
                 stop_loss = round(price * STOP_LOSS_RATIO, 2)
                 take_profit = round(price * TAKE_PROFIT_RATIO, 2)
         else:
@@ -474,7 +474,7 @@ def execute_buy(candidates, portfolio_positions, cash, total_capital, realtime_d
                         price, 
                         f"止损{stop_loss} 目标{take_profit} 评分{cand['tech_score']}"
                     )
-                except:
+                except Exception:
                     pass
     
     return buys
@@ -497,7 +497,7 @@ def calculate_performance_metrics():
             with open(f, "r", encoding="utf-8") as fp:
                 data = json.load(fp)
                 values.append(data.get("portfolio", {}).get("total_value", 0))
-        except:
+        except Exception:
             continue
     
     if len(values) < 10:
@@ -736,7 +736,7 @@ def main():
                     if NOTIFIER_AVAILABLE:
                         try:
                             wn.notify_error(str(e)[:500])
-                        except:
+                        except Exception:
                             pass
             else:
                 print(f"[{now.strftime('%H:%M')}] 非交易时段，等待中...")

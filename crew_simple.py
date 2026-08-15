@@ -91,7 +91,7 @@ def prepare_market_data() -> str:
         lines.append(f"- 涨停: {heat.get('涨停家数', 'N/A')}家")
         lines.append(f"- 跌停: {heat.get('跌停家数', 'N/A')}家")
         lines.append(f"- 市场状态: {heat.get('市场状态', 'N/A')}")
-    except:
+    except Exception:
         lines.append("## 市场情绪: (数据不可用)")
     
     # 2. 市场趋势
@@ -101,7 +101,7 @@ def prepare_market_data() -> str:
             lines.append(f"\n## 市场趋势: 【{regime.get('regime')}】置信度{regime.get('confidence', 0)}%")
             for sig in regime.get("signals", [])[:3]:
                 lines.append(f"- {sig}")
-    except:
+    except Exception:
         pass
     
     # 3. 板块轮动
@@ -111,7 +111,7 @@ def prepare_market_data() -> str:
             lines.append(f"\n## 强势板块 TOP5")
             for s in sectors[:5]:
                 lines.append(f"- {s['name']}: {s['change_pct']:+.2f}%")
-    except:
+    except Exception:
         pass
     
     # 4. 当前持仓
@@ -146,7 +146,7 @@ def prepare_market_data() -> str:
                     f"RSI={rsi:.0f} "
                     f"{trend}5日{ret:+.1f}%"
                 )
-        except:
+        except Exception:
             pass
     
     return "\n".join(lines)
@@ -216,7 +216,7 @@ def generate_trading_plan(market_data: str) -> str:
         # 验证 JSON
         parsed = json.loads(json_str)
         return json.dumps(parsed, ensure_ascii=False, indent=2)
-    except:
+    except Exception:
         # JSON 解析失败，返回原始输出
         return result
 
@@ -249,7 +249,7 @@ def format_wechat_message(trading_plan: str) -> str:
             lines.append(f"\n⚠️ {parsed['风险提示']}")
         
         return "\n".join(lines)
-    except:
+    except Exception:
         # JSON 解析失败，返回精简的原始输出
         lines = [f"📊 炒股分析 {datetime.now().strftime('%m-%d %H:%M')}\n"]
         lines.append(trading_plan[:500])
@@ -323,7 +323,7 @@ def run_simple_analysis(target: str = "315113118") -> str:
         regime = df.get_market_regime()
         risk_report = rm.daily_risk_report(pf, regime.get("regime", "震荡市"))
         report += f"\n---\n{risk_report}\n"
-    except:
+    except Exception:
         pass
     
     report += f"\n---\n{pt.get_portfolio_summary()}"

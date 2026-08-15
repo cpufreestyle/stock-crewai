@@ -9,6 +9,8 @@ from typing import Any, Callable, Dict, Optional
 import hashlib
 import json
 
+from config import CACHE_TTL_REALTIME, CACHE_TTL_MARKET, CACHE_TTL_KLINE
+
 class TTLCache:
     """简单的 TTL 缓存实现"""
     
@@ -93,11 +95,11 @@ class TTLCache:
         }
 
 
-# 创建全局缓存实例
-realtime_cache = TTLCache(default_ttl=10)  # 实时行情缓存 10 秒
-market_cache = TTLCache(default_ttl=300)    # 市场状态缓存 5 分钟
-kline_cache = TTLCache(default_ttl=60)      # K线数据缓存 1 分钟
-api_cache = TTLCache(default_ttl=30)        # 通用 API 缓存 30 秒
+# 创建全局缓存实例（TTL 统一由 config.py 管理）
+realtime_cache = TTLCache(default_ttl=CACHE_TTL_REALTIME)   # 实时行情缓存
+market_cache = TTLCache(default_ttl=CACHE_TTL_MARKET)       # 市场状态缓存
+kline_cache = TTLCache(default_ttl=CACHE_TTL_KLINE)         # K线数据缓存
+api_cache = TTLCache(default_ttl=30)                        # 通用 API 缓存 30 秒
 
 
 def cached(ttl: Optional[int] = None, cache_instance: Optional[TTLCache] = None):

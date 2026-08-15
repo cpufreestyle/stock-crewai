@@ -44,7 +44,7 @@ def get_current_prices(codes: List[str]) -> Dict[str, float]:
             if not df_price.empty:
                 prices[code] = float(df_price["收盘"].iloc[-1])
             time.sleep(0.5)
-        except:
+        except Exception:
             pass
     return prices
 
@@ -258,7 +258,7 @@ def update_portfolio_value():
             else:
                 total_value += pos["avg_cost"] * pos["shares"]
             time.sleep(0.5)
-        except:
+        except Exception:
             total_value += pos["avg_cost"] * pos["shares"]
     
     portfolio["total_value"] = round(total_value, 2)

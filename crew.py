@@ -13,6 +13,7 @@ import data_fetcher as df
 import portfolio_tracker as pt
 import recommendation_tracker as rt
 import risk_manager as rm
+from retry_utils import api_retry
 
 
 def get_llm_config():
@@ -47,6 +48,19 @@ def get_llm_config():
     }
 
 
+@api_retry
+def _post_llm(base_url: str, headers: dict, payload: dict) -> dict:
+    """POST /chat/completions，网络异常时由 tenacity 自动重试（3 次指数退避）"""
+    resp = requests.post(
+        f"{base_url}/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=600
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def call_llm(prompt: str, max_tokens: int = 800) -> str:
     """调用 LLM（OpenAI 兼容格式）"""
     config = get_llm_config()
@@ -66,19 +80,12 @@ def call_llm(prompt: str, max_tokens: int = 800) -> str:
     }
     
     try:
-        resp = requests.post(
-            f"{config['base_url']}/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=600
-        )
-        resp.raise_for_status()
-        data = resp.json()["choices"][0]["message"]
+        data = _post_llm(config['base_url'], headers, payload)["choices"][0]["message"]
         content = data.get("content", "") or ""
         reasoning = data.get("reasoning_content", "") or ""
         full = content + reasoning
         if not full:
-            print(f"[LLM 警告] 返回内容为空, finish_reason={resp.json()['choices'][0].get('finish_reason','?')}")
+            print(f"[LLM 警告] 返回内容为空")
         return full
     except Exception as e:
         print(f"[LLM 调用失败] {e}")
@@ -96,9 +103,9 @@ def prepare_market_data() -> str:
         lines.append(f"- 涨停: {heat.get('涨停家数', 'N/A')}家")
         lines.append(f"- 跌停: {heat.get('跌停家数', 'N/A')}家")
         lines.append(f"- 市场状态: {heat.get('市场状态', 'N/A')}")
-    except:
+    except Exception:
         lines.append("## 市场情绪: (数据不可用)")
-    
+
     # 2. 市场趋势
     try:
         regime = df.get_market_regime()
@@ -106,9 +113,9 @@ def prepare_market_data() -> str:
             lines.append(f"\n## 市场趋势: 【{regime.get('regime')}】置信度{regime.get('confidence', 0)}%")
             for sig in regime.get("signals", [])[:3]:
                 lines.append(f"- {sig}")
-    except:
-        pass
-    
+    except Exception as e:
+        print(f"[数据] 市场趋势获取失败: {e}")
+
     # 3. 板块轮动
     try:
         sectors = df.get_sector_performance()
@@ -116,7 +123,8 @@ def prepare_market_data() -> str:
             lines.append(f"\n## 强势板块 TOP5")
             for s in sectors[:5]:
                 lines.append(f"- {s['name']}: {s['change_pct']:+.2f}%")
-    except:
+    except Exception as e:
+        print(f"[数据] 板块表现获取失败: {e}")
         pass
     
     # 4. 当前持仓
@@ -151,9 +159,9 @@ def prepare_market_data() -> str:
                     f"RSI={rsi:.0f} "
                     f"{trend}5日{ret:+.1f}%"
                 )
-        except:
-            pass
-    
+        except Exception as e:
+            print(f"[数据] 个股 {code} 数据获取失败: {e}")
+
     return "\n".join(lines)
 
 
@@ -288,8 +296,8 @@ def run_simple_analysis(target: str = "315113118") -> str:
         regime = df.get_market_regime()
         risk_report = rm.daily_risk_report(pf, regime.get("regime", "震荡市"))
         report += f"\n---\n{risk_report}\n"
-    except:
-        pass
+    except Exception as e:
+        print(f"[数据] 风险报告生成失败: {e}")
     
     report += f"\n---\n{pt.get_portfolio_summary()}"
     
@@ -307,8 +315,8 @@ def run_simple_analysis(target: str = "315113118") -> str:
     # 尝试发送（失败不阻塞，cron delivery兜底）
     try:
         send_wechat(wechat_msg, target)
-    except:
-        pass
+    except Exception as e:
+        print(f"[通知] 微信发送失败（cron delivery 兜底）: {e}")
     
     return wechat_msg
 

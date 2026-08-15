@@ -68,7 +68,7 @@ def track_performance(filepath: str, days: int = 5) -> Dict:
                 price_df = df.get_stock_price(code)
                 if not price_df.empty:
                     entry_price = price_df["收盘"].iloc[-1]
-            except:
+            except Exception:
                 entry_price = 0
         
         try:
@@ -131,7 +131,7 @@ def get_all_recommendations() -> List[Dict]:
             with open(os.path.join(TRACKER_DIR, f), "r", encoding="utf-8") as fp:
                 data = json.load(fp)
                 all_recs.append(data)
-        except:
+        except Exception:
             continue
     
     return all_recs

@@ -195,7 +195,7 @@ def run_monitor_once() -> dict:
             "alerts_count": len(alerts),
             "executed_count": len(executed),
         })
-    except:
+    except Exception:
         pass
 
     result = {

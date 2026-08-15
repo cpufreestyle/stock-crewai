@@ -114,7 +114,7 @@ class StateStore:
         for value_json, updated in rows:
             try:
                 val = json.loads(value_json)
-            except:
+            except Exception:
                 val = value_json
             result.append({
                 "value": val,

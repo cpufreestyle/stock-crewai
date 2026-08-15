@@ -70,7 +70,7 @@ class ExecuteBuyTool(BaseTool):
                     if quotes:
                         price = quotes[0].get("price", 0)
                         current_prices[code] = price
-                except:
+                except Exception:
                     pass
 
             result = pt.update_position(
@@ -152,7 +152,7 @@ class ExecuteSellTool(BaseTool):
                     if quotes:
                         price = quotes[0].get("price", 0)
                         current_prices[code] = price
-                except:
+                except Exception:
                     price = pos.get("last_price", pos["avg_cost"])
 
             if not current_prices:

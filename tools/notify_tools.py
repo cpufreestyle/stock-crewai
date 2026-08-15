@@ -41,7 +41,7 @@ class WechatNotifyTool(BaseTool):
                 import wechat_notifier as wn
                 wn.send_message(message)
                 return json.dumps({"success": True, "channel": "wechat_notifier"}, ensure_ascii=False)
-            except:
+            except Exception:
                 pass
 
             return json.dumps({"success": False, "note": "notification channel unavailable, check config"}, ensure_ascii=False)
@@ -70,7 +70,7 @@ class DashboardNotifyTool(BaseTool):
                 try:
                     with open(notify_file, "r", encoding="utf-8") as f:
                         notifications = json.load(f)
-                except:
+                except Exception:
                     notifications = []
 
             import time

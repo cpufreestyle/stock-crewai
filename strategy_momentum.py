@@ -93,7 +93,7 @@ def get_sina_realtime(codes=None):
                 "amount": float(fields[9]) if fields[9] else 0,
                 "change_pct": (float(fields[3]) / float(fields[2]) - 1) * 100 if float(fields[2]) > 0 else 0,
             }
-        except:
+        except Exception:
             continue
 
     return result

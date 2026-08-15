@@ -16,7 +16,7 @@ try:
         llm_client = "openai"
         LLM_AVAILABLE = True
         print("[LLM] 使用 OpenAI")
-except:
+except Exception:
     pass
 
 # 2. 尝试本地 Ollama
@@ -28,7 +28,7 @@ if not LLM_AVAILABLE:
             llm_client = "ollama"
             LLM_AVAILABLE = True
             print("[LLM] 使用 Ollama (本地)")
-    except:
+    except Exception:
         pass
 
 # 3. 使用 QClaw 内置（通过文件交互）
@@ -106,7 +106,7 @@ def analyze_sentiment_news(news_list: list) -> dict:
             elif line.startswith("分数:"):
                 try:
                     score = int(line.split(":", 1)[1].strip())
-                except:
+                except Exception:
                     score = 50
             elif line.startswith("摘要:"):
                 summary = line.split(":", 1)[1].strip()
@@ -191,7 +191,7 @@ def generate_trading_signal(stock_code: str, stock_name: str, technical_data: di
             elif line.startswith("信心度:"):
                 try:
                     confidence = int(line.split(":", 1)[1].strip())
-                except:
+                except Exception:
                     confidence = 50
             elif line.startswith("理由:"):
                 reason = line.split(":", 1)[1].strip()

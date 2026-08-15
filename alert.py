@@ -4,11 +4,14 @@
 """
 import json
 import os
+import logging
 import requests
 from datetime import datetime
 from typing import Optional
 
 from safe_io import safe_load_json, safe_save_json
+
+logger = logging.getLogger(__name__)
 
 
 # 告警配置
@@ -79,8 +82,8 @@ def send_alert(title: str, content: str, alert_type: str = "error"):
             )
             if r.status_code == 200:
                 sent = True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Server酱推送失败: %s", e)
     
     # 自定义 Webhook
     url = config.get("webhook_url", "")
@@ -93,8 +96,8 @@ def send_alert(title: str, content: str, alert_type: str = "error"):
             )
             if r.status_code < 300:
                 sent = True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Webhook 推送失败: %s", e)
     
     return sent
 

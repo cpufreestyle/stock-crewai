@@ -228,9 +228,10 @@ def _sina_kline_direct(stock_code: str, period: str = "daily",
         return pd.DataFrame()
 
 
+@cached(cache_instance=kline_cache)
 def get_stock_price(stock_code: str, period: str = "daily",
                     start_date: str = None, end_date: str = None) -> pd.DataFrame:
-    """获取股票行情（新浪直连优先 → AkShare 新浪 → AkShare 东方财富）"""
+    """获取股票行情（新浪直连优先 → AkShare 新浪 → AkShare 东方财富），结果缓存 CACHE_TTL_KLINE 秒"""
     import time as _time
 
     # 日期格式
@@ -696,12 +697,12 @@ def get_realtime_quotes(stock_codes: List[str], _retry: int = 2) -> List[Dict]:
             pass
         return None
 
-    results = []
-    for code in stock_codes:
-        q = _fetch_one(code)
-        if q:
-            results.append(q)
-    return results
+    # 并行获取（单只串行时 N 只股票需 N×请求耗时，并行后总耗时≈最慢单只）
+    max_workers = min(8, len(stock_codes))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        raw_quotes = list(executor.map(_fetch_one, stock_codes))
+
+    return [q for q in raw_quotes if q]
 
 
 

@@ -73,7 +73,7 @@ class MockTrader:
         try:
             quotes = get_realtime_quotes([stock_code])
             stock_name = quotes[0]["name"] if quotes else stock_code
-        except:
+        except Exception:
             stock_name = stock_code
 
         result = update_position(stock_code, stock_name, "buy", price, shares, current_prices={stock_code: price})
@@ -172,7 +172,7 @@ class EFinanceTrader:
         # 获取股票名称
         try:
             stock_name = ef.stock.get_base_info(stock_code)["股票简称"]
-        except:
+        except Exception:
             stock_name = stock_code
 
         if stock_code in self.positions:

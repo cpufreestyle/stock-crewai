@@ -67,11 +67,8 @@ def backtest_strategy(
 
         # 模拟每日价格（用 realtime 替代历史）
         for code in stock_pool:
-            try:
-                # 这里简化处理，实际应获取历史价格
-                daily_prices[code] = {"open": 0, "close": 0, "high": 0, "low": 0}
-            except:
-                pass
+            # 这里简化处理，实际应获取历史价格
+            daily_prices[code] = {"open": 0, "close": 0, "high": 0, "low": 0}
 
         # 检查止损止盈
         for code in list(positions.keys()):
