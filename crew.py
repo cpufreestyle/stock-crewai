@@ -1,69 +1,132 @@
+"""
+简化版炒股分析 - 单次 LLM 调用（无 CrewAI）
+适用：本地小模型（Gemma-12B 等）或任何 OpenAI 兼容 API
+"""
 from dotenv import load_dotenv
 load_dotenv()
-import config
-"""
-CrewAI 主编排 - 多智能体炒股系统 v3.0
-新增: 市场状态判断、板块轮动分析、推荐追踪
-"""
-from crewai import Crew, Process
-from agents import (ResearcherAgent, RiskManagerAgent, TraderAgent, MarketWatcherAgent,
-                                SentimentAgent, BacktestAgent, PortfolioRebalancerAgent)
-from tasks import (
-    create_market_analysis_task,
-    create_research_task,
-    create_risk_task,
-    create_trading_task,
-    create_sentiment_task,
-    create_backtest_task,
-    create_rebalance_task,
-)
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import data_fetcher as df
-import portfolio_tracker as pt
-from backtest import multi_strategy_backtest
-import recommendation_tracker as rt
-import risk_manager as rm
-from datetime import datetime
 import os
 import sys
+import json
+import requests
+from datetime import datetime
+import data_fetcher as df
+import portfolio_tracker as pt
+import recommendation_tracker as rt
+import risk_manager as rm
 
 
-def prepare_market_data(n_stocks: int = 10) -> str:
-    """准备市场数据给LLM分析（优化：并行获取 + 精简数量）"""
-    lines = []
+def get_llm_config():
+    """获取 LLM 配置（支持多种提供商）"""
+    provider = os.getenv("LLM_PROVIDER", "lms-local").strip().lower()
     
-    # 市场情绪
-    heat = df.get_market_heat()
-    lines.append(f"市场情绪数据: 涨停={heat.get('涨停家数', 'N/A')}家, "
-                 f"跌停={heat.get('跌停家数', 'N/A')}家, "
-                 f"市场状态={heat.get('市场状态', 'N/A')}")
+    if provider in ("mimo", "mimo-v2.5", "xiaomi"):
+        return {
+            "api_key": os.getenv("MIMO_API_KEY", ""),
+            "base_url": os.getenv("MIMO_BASE_URL", "https://api.mimo.ai/v1"),
+            "model": os.getenv("MIMO_MODEL_NAME", "free/mimo-v2.5-pro-cn"),
+        }
     
-    # 市场状态判断（牛熊市）
-    regime = df.get_market_regime()
-    if regime.get("regime") != "未知":
-        lines.append(f"\n市场趋势: 【{regime.get('regime', 'N/A')}】置信度{regime.get('confidence', 0)}%")
-        for sig in regime.get("signals", [])[:4]:
-            lines.append(f"  - {sig}")
+    if provider == "lms-local":
+        port_file = os.path.join(os.path.dirname(__file__), ".lm-studio-port.txt")
+        if os.path.exists(port_file):
+            port = open(port_file).read().strip()
+            base_url = f"http://localhost:{port}/v1"
+        else:
+            base_url = os.getenv("OPENAI_BASE_URL", "http://localhost:12340/v1")
+        return {
+            "api_key": os.getenv("OPENAI_API_KEY", "lm-studio"),
+            "base_url": base_url,
+            "model": os.getenv("MODEL_NAME", "gemma-4-12B-it-Q4_K_M"),
+        }
     
-    # 板块轮动
-    sectors = df.get_sector_performance()
-    if sectors:
-        lines.append(f"\n强势板块 TOP5:")
-        for s in sectors[:5]:
-            lines.append(f"  {s['name']}: {s['change_pct']:+.2f}%")
+    # 默认：OpenAI 兼容
+    return {
+        "api_key": os.getenv("OPENAI_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or "",
+        "base_url": os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+        "model": os.getenv("MODEL_NAME", "deepseek/deepseek-chat-v3-0324"),
+    }
+
+
+def call_llm(prompt: str, max_tokens: int = 800) -> str:
+    """调用 LLM（OpenAI 兼容格式）"""
+    config = get_llm_config()
     
-    # 当前持仓
-    portfolio_summary = pt.get_portfolio_summary()
-    lines.append(f"\n当前持仓状态:\n{portfolio_summary}")
+    headers = {
+        "Authorization": f"Bearer {config['api_key']}",
+        "Content-Type": "application/json"
+    }
     
-    # 从候选股票池中抽样（精简到 10 只）
-    pool = df.get_index_components()["code"].tolist()[:n_stocks]
+    payload = {
+        "model": config["model"],
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1,
+        "max_tokens": max_tokens,
+    }
     
-    # 并行获取所有股票行情（优化点）
-    print(f"[并行] 正在获取 {len(pool)} 只股票行情...")
+    try:
+        resp = requests.post(
+            f"{config['base_url']}/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=600
+        )
+        resp.raise_for_status()
+        data = resp.json()["choices"][0]["message"]
+        content = data.get("content", "") or ""
+        reasoning = data.get("reasoning_content", "") or ""
+        full = content + reasoning
+        if not full:
+            print(f"[LLM 警告] 返回内容为空, finish_reason={resp.json()['choices'][0].get('finish_reason','?')}")
+        return full
+    except Exception as e:
+        print(f"[LLM 调用失败] {e}")
+        return ""
+
+
+def prepare_market_data() -> str:
+    """准备市场数据（精简版，供 LLM 分析）"""
+    lines = ["# A股市场数据分析\n"]
+    
+    # 1. 市场情绪
+    try:
+        heat = df.get_market_heat()
+        lines.append(f"## 市场情绪")
+        lines.append(f"- 涨停: {heat.get('涨停家数', 'N/A')}家")
+        lines.append(f"- 跌停: {heat.get('跌停家数', 'N/A')}家")
+        lines.append(f"- 市场状态: {heat.get('市场状态', 'N/A')}")
+    except:
+        lines.append("## 市场情绪: (数据不可用)")
+    
+    # 2. 市场趋势
+    try:
+        regime = df.get_market_regime()
+        if regime.get("regime") != "未知":
+            lines.append(f"\n## 市场趋势: 【{regime.get('regime')}】置信度{regime.get('confidence', 0)}%")
+            for sig in regime.get("signals", [])[:3]:
+                lines.append(f"- {sig}")
+    except:
+        pass
+    
+    # 3. 板块轮动
+    try:
+        sectors = df.get_sector_performance()
+        if sectors:
+            lines.append(f"\n## 强势板块 TOP5")
+            for s in sectors[:5]:
+                lines.append(f"- {s['name']}: {s['change_pct']:+.2f}%")
+    except:
+        pass
+    
+    # 4. 当前持仓
+    lines.append(f"\n## 当前持仓")
+    lines.append(pt.get_portfolio_summary())
+    
+    # 5. 候选股票（精简到 10 只）
+    lines.append(f"\n## 候选股票行情（抽样10只）")
+    pool = df.get_index_components()["code"].tolist()[:10]
     prices_map = df.get_batch_stock_prices(pool)
-    
-    lines.append(f"\n候选股票池行情（共{len(pool)}只，分析最近90天）:")
     
     for code in pool:
         try:
@@ -78,263 +141,189 @@ def prepare_market_data(n_stocks: int = 10) -> str:
             
             if price_data is not None and not price_data.empty:
                 tech = df.calculate_technical(price_data)
-                
-                ma_bull = ""
-                if tech.get("MA5") and tech.get("MA20"):
-                    if tech["MA5"] > tech["MA20"]:
-                        ma_bull = "✓"
-                
                 rsi = tech.get("RSI", 50)
-                rsi_status = "超买" if rsi > 70 else ("超卖" if rsi < 30 else "正常")
-                
                 ret = tech.get("5日涨跌%", 0)
                 trend = "↑" if ret > 2 else ("↓" if ret < -2 else "→")
                 
                 lines.append(
-                    f"  {code} {name}({sector}): "
+                    f"- {code} {name}({sector}): "
                     f"现价={tech.get('收盘价','N/A')}元 "
-                    f"MA5={tech.get('MA5','N/A')} "
-                    f"MA20={tech.get('MA20','N/A')} "
-                    f"RSI={rsi}({rsi_status}) "
-                    f"{trend}5日{ret:+.1f}%{ma_bull}"
+                    f"RSI={rsi:.0f} "
+                    f"{trend}5日{ret:+.1f}%"
                 )
-            else:
-                lines.append(f"  {code} {name}: 数据获取失败")
-        except Exception as e:
-            lines.append(f"  {code}: 异常-{str(e)[:30]}")
-    
-    # 财经新闻摘要
-    try:
-        news = df.get_news_sentiment(days=2)
-        if news:
-            lines.append(f"\n近期财经要闻({len(news)}条):")
-            for n in news[:5]:
-                title = str(n.get("新闻标题", n.get("title", "")))[:60]
-                date = n.get("发布时间", n.get("date", ""))
-                lines.append(f"  [{date}] {title}")
-    except:
-        lines.append("\n(新闻数据暂时不可用)")
+        except:
+            pass
     
     return "\n".join(lines)
 
 
-def run_backtest_for_picks(stock_codes: list) -> str:
-    """对推荐股票做回测"""
-    lines = ["\n=== 推荐股票回测 ==="]
-    for code in stock_codes:
-        r = multi_strategy_backtest(code)
-        if "error" in r:
-            lines.append(f"{code}: {r['error']}")
+def generate_trading_plan(market_data: str) -> dict:
+    """调用 LLM 生成交易计划，返回结构化 dict"""
+    
+    prompt = f"""基于以下A股市场数据，输出今日交易计划。
+
+数据：
+{market_data}
+
+---
+现在输出最终答案（中文）：
+市场判断：
+推荐买入：
+持仓操作：
+风险提示：
+"""
+    
+    print("\n[LLM] 正在调用大模型生成交易计划...")
+    result = call_llm(prompt, max_tokens=2048)
+    
+    if not result:
+        return {"error": "LLM 调用失败，请检查配置"}
+    
+    return {"raw": result}
+
+
+def format_wechat_message(result: dict) -> str:
+    """将 LLM 输出格式化为微信消息（提取最终答案部分）"""
+    if "error" in result:
+        return f"📊 炒股分析 {datetime.now().strftime('%m-%d %H:%M')}\n\n{result['error']}"
+    
+    raw = result.get("raw", "")
+    if not raw:
+        return f"📊 炒股分析 {datetime.now().strftime('%m-%d %H:%M')}\n\n结果为空"
+    
+    # 找"最终答案"后面的内容
+    import re
+    idx = raw.find("最终答案")
+    if idx >= 0:
+        raw = raw[idx:]
+    
+    # 只取中文相关的行
+    useful = []
+    for line in raw.split("\n"):
+        s = line.strip()
+        if not s:
             continue
-        lines.append(f"\n{code}:")
-        for name, data in r.get("strategies", {}).items():
-            lines.append(f"  {name}: 收益={data['收益率']} 回撤={data.get('最大回撤','N/A')} 胜率={data['胜率']} 持仓={data['当前持仓']}")
-        lines.append(f"  最佳策略: {r.get('best_strategy')} ({r.get('best_return')})")
-    return "\n".join(lines)
+        # 跳过纯英文行
+        if re.match(r'^[a-zA-Z*\s.,:;!?()"\'\[\]{}]+$', s):
+            continue
+        # 跳过太短的行
+        if len(s) < 4:
+            continue
+        useful.append(s)
+    
+    # 最多10行
+    tail = useful[:10] if len(useful) > 10 else useful
+    
+    msg = f"📊 炒股分析 {datetime.now().strftime('%m-%d %H:%M')}\n"
+    if tail:
+        msg += "\n" + "\n".join(tail)
+    return msg
 
 
-def notify_wechat(message: str):
-    """通过 openclaw 发送微信通知（静默失败，cron delivery 已接管通知）"""
+def send_wechat(message: str, target: str = "315113118"):
+    """发送微信消息（使用 openclaw message 工具）"""
+    import shutil
+    exe = shutil.which("openclaw") or shutil.which("openclaw.cmd")
+    if not exe:
+        print("[微信] openclaw 不在 PATH，跳过发送（cron delivery 兜底）")
+        return False
     try:
-        import subprocess, shutil
-        if shutil.which("openclaw") is None:
-            return False  # 静默跳过，cron delivery 会处理
+        import subprocess
         result = subprocess.run(
-            ["openclaw", "message", "send", "--channel", "wechat-access", "--message", message[:2000]],
+            [exe, "message", "send",
+             "--channel", "wechat-access",
+             "--target", target,
+             "--message", message[:2000]],
             capture_output=True, text=True, timeout=30
         )
-        return result.returncode == 0
-    except Exception:
-        return False  # 静默跳过
+        if result.returncode == 0:
+            print(f"[微信] 发送成功")
+            return True
+        else:
+            print(f"[微信] 发送失败: {result.stderr}")
+            return False
+    except Exception as e:
+        print(f"[微信] 发送异常: {e}")
+        return False
 
 
-def run_daily_analysis(with_backtest: bool = True) -> str:
-    """运行每日分析流程"""
+def run_simple_analysis(target: str = "315113118") -> str:
+    """运行简化分析（单次 LLM 调用）"""
     print(f"\n{'='*60}")
-    print(f"  A股多智能体炒股系统 v3.0 - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"  简化版炒股分析 - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"{'='*60}\n")
     
     # 1. 准备市场数据
-    print("[1/8] 准备市场数据...")
+    print("[1/4] 准备市场数据...")
     market_data = prepare_market_data()
     print("[完成]\n")
     
-    # 2. 检查 API Key
-    api_key = config.API_KEY
-    if not api_key or api_key == "sk-your-key-here":
-        print("[错误] 请先在 .env 中配置 API Key")
-        return "未配置 API Key"
-    
-    # 3. 检查止损止盈
-    print("[2/8] 检查持仓止损止盈...")
-    triggered = pt.check_stop_loss()
-    if triggered:
-        for t in triggered:
-            msg = f"⚠ {t['name']}: {t['action']} @ {t['current_price']}元 ({t.get('loss_pct', t.get('profit_pct', 0))}%)"
-            print(msg)
-            notify_wechat(msg)
-    print("[完成]\n")
-    
-    # 4. 追踪历史推荐
-    print("[3/8] 追踪历史推荐表现...")
+    # 2. 检查止损止盈
+    print("[2/4] 检查持仓止损止盈...")
     try:
-        perf = rt.get_performance_summary([5, 10])
-        print(perf[:500])
+        triggered = pt.check_stop_loss()
+        if triggered:
+            for t in triggered:
+                msg = f"⚠ {t['name']}: {t['action']} @ {t['current_price']}元"
+                print(msg)
     except Exception as e:
-        print(f"追踪失败: {e}")
+        print(f"止损检查失败: {e}")
     print("[完成]\n")
     
-    # 5. 创建 Agents
-    print("[4/8] 初始化 CrewAI Agents...")
-    market_watcher = MarketWatcherAgent().create_crewai_agent()
-    researcher = ResearcherAgent().create_crewai_agent()
-    risk_mgr = RiskManagerAgent().create_crewai_agent()
-    trader = TraderAgent().create_crewai_agent()
-    # 新增 Agent
-    sentiment_analyst = SentimentAgent().create_crewai_agent()
-    backtest_validator = BacktestAgent().create_crewai_agent()
-    rebalancer = PortfolioRebalancerAgent().create_crewai_agent()
+    # 3. 调用 LLM 生成交易计划
+    print("[3/4] 调用 LLM 生成交易计划...")
+    trading_plan = generate_trading_plan(market_data)
     print("[完成]\n")
     
-    # 6. 构建任务链
-    print("[5/8] 构建任务流水线...")
-    
-    market_task = create_market_analysis_task(market_watcher, market_data)
-    
-    research_task = create_research_task(
-        researcher,
-        market_analysis="{{market_task.output}}",
-        stock_data=market_data
-    )
-    research_task.context = [market_task]
-    
-    risk_task = create_risk_task(
-        risk_mgr,
-        stock_picks="{{research_task.output}}",
-        market_analysis="{{market_task.output}}"
-    )
-    risk_task.context = [research_task]
-    
-    trading_task = create_trading_task(
-        trader,
-        research="{{research_task.output}}",
-        risk="{{risk_task.output}}",
-        market="{{market_task.output}}"
-    )
-    trading_task.context = [risk_task]
-
-    # 新增任务（在 research_task 之后、risk_task 之前插入情绪分析和回测）
-    sentiment_task = create_sentiment_task(
-        sentiment_analyst,
-        stock_picks="{{research_task.output}}"
-    )
-    sentiment_task.context = [research_task]
-
-    backtest_task = create_backtest_task(
-        backtest_validator,
-        stock_picks="{{sentiment_task.output}}"
-    )
-    backtest_task.context = [sentiment_task]
-
-    # 修改 risk_task 依赖
-    risk_task.context = [backtest_task]
-
-    # 在 trading_task 之后添加调仓任务
-    rebalance_task = create_rebalance_task(
-        rebalancer,
-        trade_plan="{{trading_task.output}}",
-        market_state="{{market_task.output}}"
-    )
-    rebalance_task.context = [trading_task]
-    print("[完成]\n")
-    
-    # 7. 执行 Crew
-    print("[6/8] 启动 CrewAI 编排（顺序模式，约2-4分钟）...")
-    crew = Crew(
-        agents=[market_watcher, researcher, sentiment_analyst, backtest_validator, risk_mgr, trader, rebalancer],
-        tasks=[market_task, research_task, sentiment_task, backtest_task, risk_task, trading_task, rebalance_task],
-        process=Process.sequential,  # 优化：从 hierarchical 改为 sequential，速度提升 2-3 倍
-        verbose=True
-    )
-    
-    result = crew.kickoff()
-    result_str = str(result)
-    print("[完成]\n")
-    
-    # 8. 回测
-    print("[7/8] 对推荐股票进行历史回测...")
-    backtest_text = ""
-    if with_backtest:
-        import re
-        codes = re.findall(r'\b(000\d{3}|002\d{3}|600\d{3}|601\d{3}|603\d{3})\b', result_str)
-        unique_codes = list(set(codes))[:5]
-        if unique_codes:
-            backtest_text = run_backtest_for_picks(unique_codes)
-            print(backtest_text)
-    print("[完成]\n")
-    
-    # 9. 保存推荐记录
-    print("[8/8] 保存推荐记录...")
-    try:
-        stocks = rt.parse_trading_result(result_str)
-        if stocks:
-            # 获取市场状态
-            heat = df.get_market_heat()
-            regime = df.get_market_regime()
-            rt.save_recommendation(
-                stocks=stocks,
-                market_status=heat.get("市场状态", ""),
-                recommended_position=regime.get("regime", ""),
-                notes=f"推荐{len(stocks)}只股票"
-            )
-            print(f"已保存 {len(stocks)} 只推荐股票到追踪系统")
-    except Exception as e:
-        print(f"保存推荐失败: {e}")
-    
-    # 保存完整报告
-    full_report = f"# 炒股分析报告 - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-    full_report += result_str
-    if backtest_text:
-        full_report += f"\n\n{backtest_text}"
+    # 4. 保存结果
+    print("[4/4] 保存结果...")
+    report = f"# 简化版炒股分析报告 - {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+    report += f"## 市场数据\n\n{market_data}\n\n"
+    llm_raw = trading_plan.get("raw", str(trading_plan))
+    report += f"## 交易计划（LLM输出）\n\n{llm_raw}\n\n"
     
     # 风险报告
     try:
         pf = pt.load_portfolio()
         regime = df.get_market_regime()
         risk_report = rm.daily_risk_report(pf, regime.get("regime", "震荡市"))
-        full_report += f"\n\n---\n{risk_report}\n"
+        report += f"\n---\n{risk_report}\n"
     except:
         pass
     
-    full_report += f"\n---\n{pt.get_portfolio_summary()}"
+    report += f"\n---\n{pt.get_portfolio_summary()}"
     
     with open("result_latest.md", "w", encoding="utf-8") as f:
-        f.write(full_report)
-    pt.save_daily_report(full_report)
+        f.write(report)
+    pt.save_daily_report(report)
+    print("[已保存] result_latest.md + history/\n")
     
-    # 微信通知
-    short_summary = f"📊 炒股分析 {datetime.now().strftime('%m-%d %H:%M')}\n\n"
-    short_summary += result_str[:600]
-    if backtest_text:
-        short_summary += f"\n\n{backtest_text[:300]}"
-    notify_wechat(short_summary)
+    # 5. 准备微信消息（cron delivery会自动发送）
+    wechat_msg = format_wechat_message(trading_plan)
+    print(f"\n---[Trading Plan Start]---")
+    print(wechat_msg)
+    print(f"---[Trading Plan End]---")
     
-    return full_report
+    # 尝试发送（失败不阻塞，cron delivery兜底）
+    try:
+        send_wechat(wechat_msg, target)
+    except:
+        pass
+    
+    return wechat_msg
 
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
-    load_dotenv()
-    
     # 设置 UTF-8 输出
     if sys.stdout.encoding != 'utf-8':
         sys.stdout.reconfigure(encoding='utf-8')
     if sys.stderr.encoding != 'utf-8':
         sys.stderr.reconfigure(encoding='utf-8')
     
-    result = run_daily_analysis(with_backtest=True)
+    # 命令行参数：目标微信ID
+    target = sys.argv[1] if len(sys.argv) > 1 else "315113118"
+    
+    result = run_simple_analysis(target)
     print(f"\n{'='*60}")
-    print("  最终交易计划 + 回测")
+    print(f"  分析完成 - {datetime.now().strftime('%H:%M')}")
     print(f"{'='*60}")
-    print(result)
-    print("\n[已保存] result_latest.md + history/")

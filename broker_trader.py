@@ -243,6 +243,7 @@ class RealTrader:
     注意:
     - 实盘交易有风险，请谨慎使用
     - 建议先在模拟盘测试策略
+    - 默认需要人工确认（LIVE_TRADE_CONFIRM=true）
     """
 
     def __init__(self, broker="ht", account_config=None):
@@ -256,6 +257,11 @@ class RealTrader:
                 "exe_path": "客户端路径"
             }
         """
+        from config import LIVE_TRADE_CONFIRM
+        self.require_confirm = LIVE_TRADE_CONFIRM
+        self.trade_log_file = "history/trades_live.json"
+        os.makedirs("history", exist_ok=True)
+
         try:
             import easytrader
             self.trader = easytrader.use(broker)
@@ -269,7 +275,7 @@ class RealTrader:
                     self.trader.prepare(config_file)
 
             self.ready = True
-            print(f"[实盘] {broker} 接口已初始化")
+            print(f"[实盘] {broker} 接口已初始化 (人工确认={'开' if self.require_confirm else '关'})")
 
         except ImportError:
             self.ready = False
@@ -277,6 +283,35 @@ class RealTrader:
         except Exception as e:
             self.ready = False
             print(f"[错误] 实盘接口初始化失败: {e}")
+
+    def _confirm(self, action: str, code: str, price: float, shares: int) -> bool:
+        """实盘交易确认（可通过 LIVE_TRADE_CONFIRM 关闭）"""
+        if not self.require_confirm:
+            return True
+        msg = f"\n{'='*50}\n⚠️ 实盘交易确认\n{'='*50}\n操作: {action}\n股票: {code}\n价格: {price:.2f}\n数量: {shares}股\n金额: {price*shares:.2f}元\n{'='*50}\n确认执行? (yes/no): "
+        try:
+            answer = input(msg).strip().lower()
+            return answer in ("yes", "y", "是")
+        except Exception:
+            return False
+
+    def _log_trade(self, action: str, code: str, name: str, price: float, shares: int, pnl: float = 0, order_id: str = ""):
+        """记录实盘交易到日志"""
+        from safe_io import safe_update_json
+        safe_update_json(
+            self.trade_log_file,
+            lambda trades: trades + [{
+                "datetime": datetime.now().isoformat(),
+                "action": action,
+                "code": code,
+                "name": name,
+                "price": price,
+                "shares": shares,
+                "pnl": round(pnl, 2),
+                "order_id": order_id,
+            }],
+            default=[],
+        )
 
     def get_balance(self) -> Dict:
         """获取资金余额"""
@@ -319,9 +354,25 @@ class RealTrader:
         if not self.ready:
             return {"success": False, "message": "接口未初始化"}
 
+        # 人工确认
+        if not self._confirm("买入", stock_code, price, shares):
+            return {"success": False, "message": "用户取消买入"}
+
         try:
             result = self.trader.buy(stock_code, price=price, amount=shares)
-            return {"success": True, "message": f"买入委托成功", "data": result}
+            order_id = str(result.get("entrust_no", result.get("id", ""))) if isinstance(result, dict) else ""
+            # 获取股票名称
+            stock_name = stock_code
+            try:
+                from data_fetcher import get_realtime_quotes
+                quotes = get_realtime_quotes([stock_code])
+                if quotes:
+                    stock_name = quotes[0].get("name", stock_code)
+            except Exception:
+                pass
+            self._log_trade("buy", stock_code, stock_name, price, shares, order_id=order_id)
+            print(f"[实盘] 买入委托: {stock_code} {shares}股@{price:.2f} 委托号:{order_id}")
+            return {"success": True, "message": f"买入委托成功 委托号:{order_id}", "data": result, "order_id": order_id}
         except Exception as e:
             return {"success": False, "message": str(e)}
 
@@ -330,9 +381,27 @@ class RealTrader:
         if not self.ready:
             return {"success": False, "message": "接口未初始化"}
 
+        # 人工确认
+        if not self._confirm("卖出", stock_code, price, shares):
+            return {"success": False, "message": "用户取消卖出"}
+
         try:
             result = self.trader.sell(stock_code, price=price, amount=shares)
-            return {"success": True, "message": f"卖出委托成功", "data": result}
+            order_id = str(result.get("entrust_no", result.get("id", ""))) if isinstance(result, dict) else ""
+            # 获取股票名称和盈亏
+            stock_name = stock_code
+            pnl = 0.0
+            try:
+                portfolio = pt.load_portfolio() if 'pt' in dir() else {}
+                pos = portfolio.get("positions", {}).get(stock_code, {})
+                stock_name = pos.get("name", stock_code)
+                if pos:
+                    pnl = (price - pos.get("avg_cost", price)) * shares
+            except Exception:
+                pass
+            self._log_trade("sell", stock_code, stock_name, price, shares, pnl=pnl, order_id=order_id)
+            print(f"[实盘] 卖出委托: {stock_code} {shares}股@{price:.2f} 盈亏:{pnl:+.2f} 委托号:{order_id}")
+            return {"success": True, "message": f"卖出委托成功 委托号:{order_id}", "data": result, "order_id": order_id}
         except Exception as e:
             return {"success": False, "message": str(e)}
 

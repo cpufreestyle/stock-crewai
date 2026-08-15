@@ -26,10 +26,11 @@ class WechatNotifyTool(BaseTool):
             if not message:
                 return json.dumps({"error": "please provide notification content"}, ensure_ascii=False)
 
-            # Method 1: via openclaw CLI
-            if shutil.which("openclaw"):
+            # Method 1: via openclaw CLI (Windows: 需要 .cmd 后缀)
+            exe = shutil.which("openclaw") or shutil.which("openclaw.cmd")
+            if exe:
                 result = subprocess.run(
-                    ["openclaw", "message", "send", "--channel", "wechat-access", "--message", message[:2000]],
+                    [exe, "message", "send", "--channel", "wechat-access", "--target", "315113118", "--message", message[:2000]],
                     capture_output=True, text=True, timeout=30
                 )
                 if result.returncode == 0:

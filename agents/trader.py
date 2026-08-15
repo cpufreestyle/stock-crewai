@@ -14,6 +14,7 @@ from typing import Any, Dict, List
 from core.agent_base import AgentBase, AgentOutput
 from tools.trade_tools import get_trade_tools
 from tools.notify_tools import get_notify_tools
+from config import MAX_POSITIONS, MAX_POSITION_RATIO, SINGLE_POSITION_RATIO
 
 logger = logging.getLogger("agents.trader")
 
@@ -71,6 +72,10 @@ class TraderAgent(AgentBase):
             # 2. 查看当前持仓
             vp_result = self.call_tool("view_portfolio")
             vp_data = json.loads(vp_result) if isinstance(vp_result, str) else vp_result
+            raw_portfolio = vp_data.get("raw", {}) if isinstance(vp_data, dict) else {}
+            current_positions = raw_portfolio.get("positions", {})
+            current_cash = raw_portfolio.get("cash", 0)
+            total_capital = raw_portfolio.get("total_capital", 100000)
 
             # 3. 生成交易计划
             trades = []
@@ -82,7 +87,17 @@ class TraderAgent(AgentBase):
                 "holds": [],
             }
 
+            # 计算当前仓位
+            current_exposure = sum(
+                pos.get("shares", 0) * pos.get("avg_cost", 0)
+                for pos in current_positions.values()
+            )
+            current_exposure_pct = current_exposure / total_capital if total_capital > 0 else 0
+            max_position_value = total_capital * position_pct / 100  # 市场建议仓位金额
+            remaining_position_capacity = max_position_value - current_exposure
+
             # 3a. 处理风控通过的买入
+            new_buys_count = 0
             for pick in passed_picks:
                 code = pick.get("code", "")
                 name = pick.get("name", "")
@@ -93,6 +108,45 @@ class TraderAgent(AgentBase):
 
                 if shares <= 0 or price <= 0:
                     continue
+
+                # 检查持仓数量上限（已持有的不算新增）
+                if code not in current_positions:
+                    if len(current_positions) + new_buys_count >= MAX_POSITIONS:
+                        logger.info(f"[Trader] SKIP {code}: 持仓数已达上限 {MAX_POSITIONS}")
+                        continue
+
+                # 检查仓位上限（按市场建议仓位）
+                buy_value = price * shares
+                if remaining_position_capacity <= 0:
+                    logger.info(f"[Trader] SKIP {code}: 仓位已达建议上限 {position_pct}%")
+                    continue
+
+                if buy_value > remaining_position_capacity:
+                    # 调整股数以适配剩余仓位
+                    adj_shares = int(remaining_position_capacity / price / 100) * 100
+                    if adj_shares < 100:
+                        logger.info(f"[Trader] SKIP {code}: 剩余仓位不足买100股")
+                        continue
+                    shares = adj_shares
+                    buy_value = shares * price
+
+                # 检查单只仓位上限
+                single_max = total_capital * SINGLE_POSITION_RATIO
+                if buy_value > single_max:
+                    adj_shares = int(single_max / price / 100) * 100
+                    if adj_shares < 100:
+                        continue
+                    shares = adj_shares
+                    buy_value = shares * price
+
+                # 检查资金
+                if buy_value > current_cash:
+                    adj_shares = int(current_cash / price / 100) * 100
+                    if adj_shares < 100:
+                        logger.info(f"[Trader] SKIP {code}: 资金不足")
+                        continue
+                    shares = adj_shares
+                    buy_value = shares * price
 
                 # 执行买入
                 buy_result = self.call_tool(
@@ -108,6 +162,12 @@ class TraderAgent(AgentBase):
                 if isinstance(buy_data, dict) and buy_data.get("success"):
                     # 设置止损止盈
                     self.call_tool("set_stop_loss", code=code, stop_loss=stop_loss, take_profit=take_profit)
+
+                    # 更新跟踪变量
+                    remaining_position_capacity -= buy_value
+                    current_cash -= buy_value
+                    if code not in current_positions:
+                        new_buys_count += 1
 
                     trades.append({
                         "action": "buy",

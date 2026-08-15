@@ -436,7 +436,13 @@ def get_market_regime(index_code: str = "000001", days: int = 120) -> Dict:
         if idx_df.empty or len(idx_df) < 60:
             return {"regime": "未知", "confidence": 0, "signals": ["数据不足"]}
         
-        closes = idx_df["close"]
+        # 统一列名：新浪直连返回中文列名，akshare返回英文列名
+        if "收盘" in idx_df.columns:
+            closes = idx_df["收盘"]
+        elif "close" in idx_df.columns:
+            closes = idx_df["close"]
+        else:
+            return {"regime": "未知", "confidence": 0, "signals": ["列名不匹配，无法提取收盘价"]}
         
         # 计算均线
         ma20 = closes.rolling(20).mean()
@@ -536,7 +542,7 @@ def get_sector_performance() -> List[Dict]:
         top_sectors = []
         for _, row in df_sorted.head(10).iterrows():
             top_sectors.append({
-                "name": str(row.get("名称", "")),
+                "name": str(row.get("板块", "")),
                 "change_pct": round(float(row.get("涨跌幅", 0)), 2),
                 "volume": str(row.get("成交额", "")),
                 "turnover": str(row.get("换手率", ""))

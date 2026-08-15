@@ -2,6 +2,7 @@
 策略参数集中管理配置文件
 所有策略相关参数统一在此定义，方便调整和回测
 """
+import os
 
 # ========================
 # 持仓管理
@@ -48,6 +49,16 @@ STOP_LOSS_CHECK_ENABLED = True # 是否启用止损检查
 ATR_STOP_LOSS_ENABLED = True   # 是否启用 ATR 动态止损
 
 # ========================
+# 熔断器（Circuit Breaker）
+# ========================
+CIRCUIT_BREAKER_DAILY_LOSS_PCT = 5      # 单日亏损超过 5% 触发熔断
+CIRCUIT_BREAKER_CONSECUTIVE_STOPS = 3   # 连续 3 次止损触发熔断
+CIRCUIT_BREAKER_COOLDOWN_MINUTES = 120  # 熔断冷却时间（分钟）
+CIRCUIT_BREAKER_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "circuit_breaker_state.json"
+)
+
+# ========================
 # API 缓存 TTL（秒）
 # ========================
 CACHE_TTL_REALTIME = 10        # 实时行情缓存
@@ -76,6 +87,15 @@ NET_VALUE_HISTORY_FILE = "net_value_history.json"
 # ========================
 # API Key
 # ========================
-import os
 API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or ""
 API_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
+
+# ========================
+# 交易模式
+# ========================
+# mock: 本地模拟盘 | efinance: 东方财富模拟盘 | real: 实盘
+TRADING_MODE = os.getenv("TRADING_MODE", "mock").strip().lower()
+# 实盘券商代码 (ht=华泰, dfcf=东方财富, ths=同花顺)
+BROKER_CODE = os.getenv("BROKER_CODE", "ht")
+# 实盘交易确认 (true=需人工确认, false=全自动)
+LIVE_TRADE_CONFIRM = os.getenv("LIVE_TRADE_CONFIRM", "true").strip().lower() == "true"

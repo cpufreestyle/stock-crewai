@@ -4,6 +4,8 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from safe_io import safe_load_json, safe_save_json
+
 
 PORTFOLIO_FILE = os.path.join(os.path.dirname(__file__), "portfolio.json")
 HISTORY_DIR = os.path.join(os.path.dirname(__file__), "history")
@@ -15,24 +17,23 @@ def ensure_dirs():
 
 def load_portfolio() -> Dict:
     """加载当前持仓"""
-    if os.path.exists(PORTFOLIO_FILE):
-        with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {
-        "positions": {},
-        "cash": 100000,
-        "total_capital": 100000,
-        "created": datetime.now().isoformat(),
-        "total_value": 100000,
-        "total_return_pct": 0.0
-    }
+    return safe_load_json(
+        PORTFOLIO_FILE,
+        default={
+            "positions": {},
+            "cash": 100000,
+            "total_capital": 100000,
+            "created": datetime.now().isoformat(),
+            "total_value": 100000,
+            "total_return_pct": 0.0
+        },
+    )
 
 
 def save_portfolio(portfolio: Dict):
     """保存持仓"""
     ensure_dirs()
-    with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
-        json.dump(portfolio, f, ensure_ascii=False, indent=2)
+    safe_save_json(PORTFOLIO_FILE, portfolio)
 
 
 def update_position(
@@ -88,26 +89,25 @@ def update_position(
 
         portfolio["cash"] += revenue
 
-        # 记录交易
+        # 记录交易（并发安全）
         ensure_dirs()
         trade_log = os.path.join(HISTORY_DIR, f"trades_{datetime.now().strftime('%Y%m')}.json")
-        trades = []
-        if os.path.exists(trade_log):
-            with open(trade_log, "r", encoding="utf-8") as f:
-                trades = json.load(f)
-        trades.append({
-            "date": datetime.now().isoformat(),
-            "code": stock_code,
-            "name": stock_name,
-            "action": action,
-            "price": price,
-            "shares": shares,
-            "pnl": round(pnl, 2),
-            "pnl_pct": round(pnl_pct, 2),
-            "reason": reason
-        })
-        with open(trade_log, "w", encoding="utf-8") as f:
-            json.dump(trades, f, ensure_ascii=False, indent=2)
+        from safe_io import safe_update_json
+        safe_update_json(
+            trade_log,
+            lambda trades: trades + [{
+                "date": datetime.now().isoformat(),
+                "code": stock_code,
+                "name": stock_name,
+                "action": action,
+                "price": price,
+                "shares": shares,
+                "pnl": round(pnl, 2),
+                "pnl_pct": round(pnl_pct, 2),
+                "reason": reason
+            }],
+            default=[],
+        )
 
     # 计算总资产
     total_value = portfolio["cash"]
@@ -256,10 +256,7 @@ def get_trade_history(month: str = None) -> List[Dict]:
         month = datetime.now().strftime("%Y%m")
 
     trade_log = os.path.join(HISTORY_DIR, f"trades_{month}.json")
-    if os.path.exists(trade_log):
-        with open(trade_log, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+    return safe_load_json(trade_log, default=[])
 
 
 if __name__ == "__main__":

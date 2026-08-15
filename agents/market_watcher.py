@@ -59,7 +59,7 @@ class MarketWatcherAgent(AgentBase):
             elif regime == "熊市":
                 suggested_position = "轻仓（2-3成）或空仓"
                 position_pct = 30
-                should_trade = confidence > 60
+                should_trade = False  # 熊市不交易，等待市场企稳
             else:
                 suggested_position = "半仓（4-5成）"
                 position_pct = 50
@@ -81,7 +81,7 @@ class MarketWatcherAgent(AgentBase):
             # 写入共享状态
             state.set_market_state(market_state)
 
-            logger.info(f"[MarketWatcher] done: {regime} (conf={confidence}%) → {suggested_position}")
+            logger.info(f"[MarketWatcher] done: {regime} (conf={confidence}%) -> {suggested_position}")
 
             return AgentOutput(
                 success=True,

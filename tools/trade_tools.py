@@ -13,6 +13,31 @@ from tools.compat import BaseTool
 import portfolio_tracker as pt
 import data_fetcher as df
 
+# 交易接口单例（惰性初始化）
+_broker_trader = None
+
+
+def _get_broker_trader():
+    """根据配置获取交易接口（mock/efinance/real）"""
+    global _broker_trader
+    if _broker_trader is not None:
+        return _broker_trader
+    try:
+        from config import TRADING_MODE, BROKER_CODE
+        mode = TRADING_MODE
+    except Exception:
+        mode = "mock"
+    if mode == "real":
+        try:
+            from broker_trader import create_trader
+            _broker_trader = create_trader("real", broker=BROKER_CODE)
+        except Exception as e:
+            print(f"[TradeTools] 实盘接口初始化失败，降级为模拟盘: {e}")
+            _broker_trader = None  # 使用虚拟盘
+    else:
+        _broker_trader = None  # 使用虚拟盘
+    return _broker_trader
+
 
 # ── Execute Buy ──────────────────────────────────────────────────────
 class ExecuteBuyInput(BaseModel):
@@ -60,6 +85,19 @@ class ExecuteBuyTool(BaseTool):
 
             if "error" in result:
                 return json.dumps({"success": False, "error": result["error"]}, ensure_ascii=False)
+
+            # 如果是实盘模式，同步到券商接口
+            broker = _get_broker_trader()
+            if broker is not None and hasattr(broker, "ready") and broker.ready:
+                broker_result = broker.buy(code, price, shares)
+                if not broker_result.get("success"):
+                    # 实盘下单失败，回滚虚拟盘操作
+                    pt.update_position(
+                        stock_code=code, stock_name=name, action="sell",
+                        price=price, shares=shares, reason=f"实盘下单失败回滚: {broker_result.get('message', '')}",
+                        current_prices={code: price},
+                    )
+                    return json.dumps({"success": False, "error": f"实盘下单失败: {broker_result.get('message', '')}"}, ensure_ascii=False)
 
             return json.dumps({
                 "success": True,
@@ -133,6 +171,19 @@ class ExecuteSellTool(BaseTool):
             if "error" in result:
                 return json.dumps({"success": False, "error": result["error"]}, ensure_ascii=False)
 
+            # 如果是实盘模式，同步到券商接口
+            broker = _get_broker_trader()
+            if broker is not None and hasattr(broker, "ready") and broker.ready:
+                broker_result = broker.sell(code, price, shares)
+                if not broker_result.get("success"):
+                    # 实盘下单失败，回滚虚拟盘操作（重新买入）
+                    pt.update_position(
+                        stock_code=code, stock_name=name, action="buy",
+                        price=price, shares=shares, reason=f"实盘卖出失败回滚: {broker_result.get('message', '')}",
+                        current_prices={code: price},
+                    )
+                    return json.dumps({"success": False, "error": f"实盘卖出失败: {broker_result.get('message', '')}"}, ensure_ascii=False)
+
             pnl = (price - pos["avg_cost"]) * shares
             return json.dumps({
                 "success": True,
@@ -163,10 +214,7 @@ class SetStopLossTool(BaseTool):
             if not code:
                 return json.dumps({"error": "please provide stock code"}, ensure_ascii=False)
 
-            result = pt.set_stop_loss(code, stop_loss, take_profit)
-
-            if "error" in result:
-                return json.dumps({"success": False, "error": result["error"]}, ensure_ascii=False)
+            pt.set_stop_loss(code, stop_loss, take_profit)
 
             return json.dumps({
                 "success": True,

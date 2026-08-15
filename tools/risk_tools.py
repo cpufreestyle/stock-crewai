@@ -163,17 +163,21 @@ class CircuitBreakerCheckTool(BaseTool):
             total_value = portfolio.get("total_value", 100000)
 
             can_trade = cb.can_trade(total_value)
+            status = cb.get_status()
 
             return json.dumps({
+                "是否允许交易": "是" if can_trade else "否（熔断器已触发）",
                 "can_trade": "Yes" if can_trade else "No (circuit breaker triggered)",
-                "consecutive_stops": cb._state.get("consecutive_stops", 0),
-                "is_tripped": cb._state.get("tripped", False),
-                "trip_reason": cb._state.get("trip_reason", ""),
+                "连续止损次数": status.get("consecutive_stops", 0),
+                "是否熔断": status.get("tripped", False),
+                "熔断原因": status.get("reason", ""),
+                "剩余冷却时间(分钟)": status.get("remaining_minutes"),
             }, ensure_ascii=False)
         except Exception as e:
             return json.dumps({
+                "是否允许交易": "是",
                 "can_trade": "Yes",
-                "note": "circuit breaker module unavailable, default allow",
+                "note": f"circuit breaker module unavailable: {e}, default allow",
             }, ensure_ascii=False)
 
 

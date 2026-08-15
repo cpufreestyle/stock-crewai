@@ -73,6 +73,24 @@ class CircuitBreaker:
         self._state["trip_reason"] = reason
         self._save()
 
+    def can_trade(self, current_total_value: float = None) -> bool:
+        """检查是否允许交易（熔断未触发且冷却期已过）
+
+        Args:
+            current_total_value: 当前总资产，用于记录日初资产
+        Returns:
+            True: 可以交易, False: 熔断中，禁止交易
+        """
+        # 如果传入了当前资产，先记录交易上下文
+        if current_total_value is not None:
+            today = datetime.now().strftime("%Y-%m-%d")
+            if self._state.get("day_start_date") != today:
+                self._state["day_start_date"] = today
+                self._state["day_start_value"] = current_total_value
+                self._save()
+
+        return not self.is_tripped()
+
     def is_tripped(self) -> bool:
         """检查是否处于熔断状态（含冷却期判断）"""
         if not self._state.get("tripped"):
