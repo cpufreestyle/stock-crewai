@@ -12,7 +12,7 @@
 ### 2. 文件结构
 ```
 stock-crewai/
-├── run_virtual.py          # 主程序（自动买卖）
+├── run_virtual_v4.py          # 主程序（自动买卖）
 ├── portfolio_tracker.py    # 持仓管理
 ├── risk_manager.py         # 风险管理
 ├── data_fetcher.py         # 数据获取（多源）
@@ -30,12 +30,12 @@ stock-crewai/
 #### 单次运行
 ```bash
 cd D:\qclaw-workspace\stock-crewai
-python run_virtual.py
+python run_virtual_v4.py
 ```
 
 #### 循环运行（交易时段内每10分钟）
 ```bash
-python run_virtual.py --loop
+python run_virtual_v4.py --loop
 ```
 
 #### 安装定时任务（管理员权限）
@@ -92,10 +92,10 @@ cd D:\qclaw-workspace\stock-crewai
 cd D:\qclaw-workspace\stock-crewai
 
 # 2. 单次运行
-python run_virtual.py
+python run_virtual_v4.py
 
 # 3. 循环运行（推荐）
-python run_virtual.py --loop
+python run_virtual_v4.py --loop
 ```
 
 ---

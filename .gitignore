@@ -33,14 +33,18 @@ data/
 portfolio.json.example
 
 # 临时/调试文件
-temp_*.py
-test_*.py
-fix_*.py
-debug_*.py
-debug_*.json
-diagnose_*.py
+/_*.py
+/_*.json
+/temp_*.py
+/test_*.py
+/test-*.bat
+/fix_*.py
+/debug_*.py
+/debug_*.json
+/diagnose_*.py
 *_backup*.py
 *.backup*
+/run_output.txt
 *_example.py
 *_integration*.py
 *_integration*.md
@@ -75,6 +79,15 @@ recommendations/*.json
 *.bak
 
 # SQLite 临时文件
+*.db
 *.db-shm
 *.db-wal
 *.db-journal
+
+# 运行时数据与状态
+trade_log.json
+circuit_breaker_state.json
+.lm-studio-port.txt
+
+# Codely CLI 会话数据
+.codely-cli/
