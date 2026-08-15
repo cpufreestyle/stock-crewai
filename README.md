@@ -190,6 +190,24 @@ python crew.py --backtest
 python performance_report.py
 ```
 
+### 场景 5：参与掘金仿真排名（双轨同步）
+本地虚拟盘每笔成交自动镜像到掘金量化仿真账户，参与官网绩效排行/投资大赛。
+
+```bash
+# 1. 一次性搭建桥接环境（gmtrade 仅支持 Python≤3.10，脚本自动装独立 .gmenv）
+powershell -ExecutionPolicy Bypass -File setup_gm_env.ps1
+
+# 2. .env 配置 GM_ENABLED/GM_TOKEN/GM_ACCOUNT_ID（掘金仿真官网"API交易指引"处获取）
+
+# 3. 验证登录（不下单）
+.gmenv\Scripts\python.exe gm_sync_worker.py --dry-run
+
+# 4. 查看对接状态
+python gm_broker.py
+```
+
+说明：掘金侧失败只记日志不阻塞本地交易；订单队列在 `history/gm_sync_queue.json`，恢复后自动重试。
+
 ## 📝 更新日志
 
 ### v4.2.0 (2026-06-10) - Complete Quantitative Trading System

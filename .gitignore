@@ -89,5 +89,8 @@ trade_log.json
 circuit_breaker_state.json
 .lm-studio-port.txt
 
+# 掘金仿真桥接环境（Python 3.10 + gmtrade）
+.gmenv/
+
 # Codely CLI 会话数据
 .codely-cli/

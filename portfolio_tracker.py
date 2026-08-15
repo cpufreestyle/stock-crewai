@@ -124,6 +124,15 @@ def update_position(
     )
 
     save_portfolio(portfolio)
+
+    # 双轨同步：镜像成交到掘金仿真平台参与排名（未配置/失败均不影响本地，见 gm_broker.py）
+    if action in ("buy", "sell"):
+        try:
+            from gm_broker import mirror_trade
+            mirror_trade(action, stock_code, price, shares, stock_name)
+        except Exception as e:
+            print(f"[同步] 镜像交易异常（不影响本地）: {e}")
+
     return portfolio
 
 
