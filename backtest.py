@@ -17,7 +17,7 @@ def backtest_strategy(
     initial_capital: float = 100000,
     commission: float = 0.0003,  # 万3手续费
     slippage: float = 0.001  # 千1滑点
-):
+) -> dict:
     """
     回测策略
     
@@ -57,18 +57,35 @@ def backtest_strategy(
 
     print(f"共 {len(date_list)} 个交易日\n")
 
+    # 一次性拉取全部股票历史数据（避免逐日逐股请求）
+    print("[回测] 正在拉取历史数据...")
+    batch_data = df.get_batch_stock_prices(stock_pool, max_workers=8)
+    # 构建 {code: {date_str: {"open","close","high","low"}}} 查找表
+    price_lookup: dict[str, dict[str, dict]] = {}
+    for code, hist_df in batch_data.items():
+        for _, row in hist_df.iterrows():
+            d = str(row.get("日期", "")).strip()
+            if d:
+                price_lookup.setdefault(code, {})[d] = {
+                    "open": float(row.get("开盘", 0)),
+                    "close": float(row.get("收盘", 0)),
+                    "high": float(row.get("最高", 0)),
+                    "low": float(row.get("最低", 0)),
+                    "name": code,
+                }
+    print(f"[回测] 已加载 {len(price_lookup)}/{len(stock_pool)} 只股票历史数据\n")
+
     # 按日回测
     for i, date in enumerate(date_list):
         if i % 20 == 0:
             print(f"进度: {i}/{len(date_list)} ({i/len(date_list)*100:.1f}%)")
 
-        # 获取所有股票当日数据（简化：用新浪行情模拟）
+        # 从预取的历史数据中查找当日价格
         daily_prices = {}
-
-        # 模拟每日价格（用 realtime 替代历史）
         for code in stock_pool:
-            # 这里简化处理，实际应获取历史价格
-            daily_prices[code] = {"open": 0, "close": 0, "high": 0, "low": 0}
+            prices = price_lookup.get(code, {})
+            if date in prices:
+                daily_prices[code] = prices[date]
 
         # 检查止损止盈
         for code in list(positions.keys()):
@@ -227,35 +244,26 @@ def backtest_strategy(
 
 
 def calculate_max_drawdown(values: list) -> float:
-    """计算最大回撤"""
-    if not values:
+    """计算最大回撤（numpy 向量化）"""
+    if not values or len(values) < 2:
         return 0.0
-
-    peak = values[0]
-    max_dd = 0.0
-
-    for v in values:
-        if v > peak:
-            peak = v
-        dd = (peak - v) / peak * 100
-        if dd > max_dd:
-            max_dd = dd
-
-    return max_dd
+    import numpy as np
+    arr = np.array(values, dtype=float)
+    peaks = np.maximum.accumulate(arr)
+    drawdowns = (peaks - arr) / peaks * 100
+    return float(drawdowns.max())
 
 
 def calculate_sharpe(returns: list, risk_free: float = 0.0) -> float:
-    """计算夏普比率"""
+    """计算夏普比率（numpy 向量化）"""
     if len(returns) < 2:
         return 0.0
-
-    mean_ret = sum(returns) / len(returns)
-    std_ret = (sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)) ** 0.5
-
-    if std_ret == 0:
+    import numpy as np
+    arr = np.array(returns, dtype=float)
+    std = arr.std(ddof=1)
+    if std == 0:
         return 0.0
-
-    return (mean_ret - risk_free) / std_ret
+    return float((arr.mean() - risk_free) / std)
 
 
 def multi_strategy_backtest(code: str, days: int = 90) -> dict:
@@ -303,28 +311,15 @@ def multi_strategy_backtest(code: str, days: int = 90) -> dict:
         final_price = price_data["收盘"].iloc[-1]
         buy_hold_return = (final_price - initial_price) / initial_price * 100
         
-        # 均线策略收益（简化计算）
-        position = 0
-        cash = 100000
-        shares = 0
-        ma_strategy_value = 100000
-        
-        for i in range(20, len(price_data)):
-            if ma5.iloc[i] > ma20.iloc[i] and position == 0:
-                # 买入
-                shares = cash / price_data["收盘"].iloc[i]
-                cash = 0
-                position = 1
-            elif ma5.iloc[i] < ma20.iloc[i] and position == 1:
-                # 卖出
-                cash = shares * price_data["收盘"].iloc[i]
-                shares = 0
-                position = 0
-        
-        if position == 1:
-            cash = shares * price_data["收盘"].iloc[-1]
-        
-        ma_return = (cash - 100000) / 100000 * 100
+        # 均线策略收益（向量化：信号 → 持仓 → 收益）
+        closes = price_data["收盘"]
+        long_signal = (ma5 > ma20).astype(int)
+        # 持仓 = 前一日信号（T日信号 T+1 执行，避免未来函数）
+        position = long_signal.shift(1).fillna(0)
+        daily_ret = closes.pct_change().fillna(0)
+        strategy_ret = position * daily_ret
+        ma_strategy_value = (1 + strategy_ret).cumprod() * 100000
+        ma_return = (ma_strategy_value.iloc[-1] - 100000) / 100000 * 100
         
         # 策略2: RSI策略
         delta = price_data["收盘"].diff()
@@ -333,25 +328,12 @@ def multi_strategy_backtest(code: str, days: int = 90) -> dict:
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
         
-        # RSI策略（RSI<30买入，RSI>70卖出）
-        cash = 100000
-        shares = 0
-        position = 0
-        
-        for i in range(14, len(price_data)):
-            if rsi.iloc[i] < 30 and position == 0:
-                shares = cash / price_data["收盘"].iloc[i]
-                cash = 0
-                position = 1
-            elif rsi.iloc[i] > 70 and position == 1:
-                cash = shares * price_data["收盘"].iloc[i]
-                shares = 0
-                position = 0
-        
-        if position == 1:
-            cash = shares * price_data["收盘"].iloc[-1]
-        
-        rsi_return = (cash - 100000) / 100000 * 100
+        # RSI策略（向量化：RSI<30 持仓，RSI>70 空仓）
+        rsi_signal = (rsi < 30).astype(int)
+        rsi_position = rsi_signal.shift(1).fillna(0)
+        rsi_strategy_ret = rsi_position * daily_ret
+        rsi_strategy_value = (1 + rsi_strategy_ret).cumprod() * 100000
+        rsi_return = (rsi_strategy_value.iloc[-1] - 100000) / 100000 * 100
         
         # 构建结果
         strategies = {

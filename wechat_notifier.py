@@ -1,18 +1,31 @@
-"""企业微信通知模块"""
+"""企业微信通知模块（统一通知入口）
+
+WEBHOOK_URL 从 .env 读取（WECHAT_WEBHOOK_URL），未配置时自动跳过。
+alert.py 的 Server酱/Webhook 渠道也委托到此处。
+"""
 import sys; sys.stdout.reconfigure(encoding='utf-8')
+import os
 import requests
 import json
+import logging
 from datetime import datetime
 
-# 企业微信 webhook 地址（需替换）
-# 获取方式：企业微信后台 → 应用管理 → 自建应用 → 查看 Secret → 接收消息 → Webhook
-WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE"
+logger = logging.getLogger(__name__)
+
+# 企业微信 webhook 地址（从 .env 读取）
+WEBHOOK_URL = os.getenv("WECHAT_WEBHOOK_URL", "")
+
+
+def _get_webhook() -> str:
+    """延迟读取环境变量（支持运行时通过 .env 热加载）"""
+    return os.getenv("WECHAT_WEBHOOK_URL", WEBHOOK_URL)
 
 
 def send_text(content: str):
     """发送文本消息"""
-    if WEBHOOK_URL == "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE":
-        print("[通知] Webhook未配置，跳过")
+    url = _get_webhook()
+    if not url:
+        logger.info("[通知] Webhook未配置，跳过")
         return False
 
     data = {
@@ -38,8 +51,9 @@ def send_text(content: str):
 
 def send_markdown(content: str):
     """发送Markdown消息"""
-    if WEBHOOK_URL == "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE":
-        print("[通知] Webhook未配置，跳过")
+    url = _get_webhook()
+    if not url:
+        logger.info("[通知] Webhook未配置，跳过")
         return False
 
     data = {

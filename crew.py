@@ -94,22 +94,32 @@ def call_llm(prompt: str, max_tokens: int = 800) -> str:
 
 def prepare_market_data() -> str:
     """准备市场数据（精简版，供 LLM 分析）"""
+    from concurrent.futures import ThreadPoolExecutor
+
     lines = ["# A股市场数据分析\n"]
-    
+
+    # 并行获取市场情绪/趋势/板块（三个独立 API 调用，串行约 3×耗时）
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        heat_future = pool.submit(df.get_market_heat)
+        regime_future = pool.submit(df.get_market_regime)
+        sectors_future = pool.submit(df.get_sector_performance)
+        heat = heat_future.result()
+        regime = regime_future.result()
+        sectors = sectors_future.result()
+
     # 1. 市场情绪
     try:
-        heat = df.get_market_heat()
-        lines.append(f"## 市场情绪")
-        lines.append(f"- 涨停: {heat.get('涨停家数', 'N/A')}家")
-        lines.append(f"- 跌停: {heat.get('跌停家数', 'N/A')}家")
-        lines.append(f"- 市场状态: {heat.get('市场状态', 'N/A')}")
+        if heat:
+            lines.append(f"## 市场情绪")
+            lines.append(f"- 涨停: {heat.get('涨停家数', 'N/A')}家")
+            lines.append(f"- 跌停: {heat.get('跌停家数', 'N/A')}家")
+            lines.append(f"- 市场状态: {heat.get('市场状态', 'N/A')}")
     except Exception:
         lines.append("## 市场情绪: (数据不可用)")
 
     # 2. 市场趋势
     try:
-        regime = df.get_market_regime()
-        if regime.get("regime") != "未知":
+        if regime and regime.get("regime") != "未知":
             lines.append(f"\n## 市场趋势: 【{regime.get('regime')}】置信度{regime.get('confidence', 0)}%")
             for sig in regime.get("signals", [])[:3]:
                 lines.append(f"- {sig}")
@@ -118,14 +128,12 @@ def prepare_market_data() -> str:
 
     # 3. 板块轮动
     try:
-        sectors = df.get_sector_performance()
         if sectors:
             lines.append(f"\n## 强势板块 TOP5")
             for s in sectors[:5]:
                 lines.append(f"- {s['name']}: {s['change_pct']:+.2f}%")
     except Exception as e:
         print(f"[数据] 板块表现获取失败: {e}")
-        pass
     
     # 4. 当前持仓
     lines.append(f"\n## 当前持仓")

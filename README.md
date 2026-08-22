@@ -101,17 +101,24 @@ python crew.py --backtest
 
 ```
 stock-crewai/
-├── crew.py                 # 主编排（8 Agent 工作流）
-├── agents.py               # Agent 定义（8 个 Agent）
-├── tasks.py                # 任务定义（8 个任务）
-├── config.py               # 配置文件
-├── portfolio_tracker.py    # 持仓管理
-├── data_fetcher.py         # 数据获取（新浪+腾讯）
-├── backtest.py             # 回测框架
-├── recommendation_tracker.py # 推荐追踪
+├── main.py                 # 统一入口（--test/--dashboard/--all）
+├── crew.py                 # LLM 分析编排（单次运行）
+├── run_virtual_v4.py       # 虚拟盘自动交易（循环模式）
+├── web_dashboard.py        # Flask Web 面板（:5000）
+├── config.py               # 配置文件（策略参数+缓存TTL）
+├── agents/                 # 8 个 Agent 定义（唯一生效包）
+├── core/                   # 框架内核（orchestrator/event_bus/state_store）
+├── tools/                  # CrewAI 工具（market/stock/risk/trade/notify）
+├── workflows/              # 工作流（daily_analysis/realtime_monitor）
+├── portfolio_tracker.py    # 持仓管理（+掘金双轨同步挂钩）
+├── data_fetcher.py         # 数据获取（新浪+东财，并行+缓存）
+├── backtest.py             # 回测框架（真实历史数据+向量化）
 ├── risk_manager.py         # 风险管理
-├── wechat_notifier.py     # 微信通知
-└── requirements.txt       # 依赖清单
+├── gm_broker.py            # 掘金仿真平台对接（双轨同步）
+├── gm_sync_worker.py       # 掘金同步 worker（运行于 .gmenv/Python 3.10）
+├── wechat_notifier.py      # 微信通知（统一通知入口）
+├── api_cache.py            # API 缓存层（TTL+LRU+线程安全）
+└── requirements.txt        # 依赖清单
 ```
 
 ## ⚙️ 配置说明

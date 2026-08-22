@@ -1,6 +1,7 @@
 """监控告警模块 - 关键事件推送通知
 
-支持 Server酱（WeChat）、自定义 Webhook
+统一委托到 wechat_notifier.py 发送（企业微信 Markdown），
+同时保留 Server酱/Webhook 备用渠道（如配置了 alert_config.json）。
 """
 import json
 import os
@@ -10,11 +11,10 @@ from datetime import datetime
 from typing import Optional
 
 from safe_io import safe_load_json, safe_save_json
+import wechat_notifier as wn
 
 logger = logging.getLogger(__name__)
 
-
-# 告警配置
 ALERT_CONFIG_FILE = "alert_config.json"
 
 
@@ -70,6 +70,13 @@ def send_alert(title: str, content: str, alert_type: str = "error"):
     full_content = f"**{timestamp}**\n\n{content}"
     
     sent = False
+    
+    # 主渠道：企业微信（委托到 wechat_notifier）
+    try:
+        if wn.send_markdown(f"### {title}\n\n{full_content}"):
+            sent = True
+    except Exception as e:
+        logger.warning("企业微信推送失败: %s", e)
     
     # Server酱推送
     key = config.get("server_chan_key", "")

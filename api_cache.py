@@ -1,98 +1,88 @@
 """
 API 缓存层 - 减少重复请求，提升性能
-支持 TTL（Time-To-Live）缓存，自动过期
+支持 TTL（Time-To-Live）+ LRU 淘汰，线程安全
 """
 
 import time
 import functools
+import threading
+from collections import OrderedDict
 from typing import Any, Callable, Dict, Optional
 import hashlib
-import json
 
 from config import CACHE_TTL_REALTIME, CACHE_TTL_MARKET, CACHE_TTL_KLINE
 
+_DEFAULT_MAX_SIZE = 500
+
+
 class TTLCache:
-    """简单的 TTL 缓存实现"""
-    
-    def __init__(self, default_ttl: int = 60):
-        """
-        Args:
-            default_ttl: 默认 TTL（秒）
-        """
+    """TTL + LRU 缓存，线程安全"""
+
+    def __init__(self, default_ttl: int = 60, max_size: int = _DEFAULT_MAX_SIZE):
         self.default_ttl = default_ttl
-        self._cache: Dict[str, Dict[str, Any]] = {}
-    
+        self.max_size = max_size
+        self._cache: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._lock = threading.Lock()
+
     def _make_key(self, func_name: str, args: tuple, kwargs: dict) -> str:
-        """生成缓存 key"""
-        # 将参数序列化为字符串
+        """生成缓存 key（list/tuple 参数排序以提升命中率）"""
         key_parts = [func_name]
-        key_parts.extend(str(arg) for arg in args)
+        for arg in args:
+            if isinstance(arg, (list, tuple)):
+                key_parts.append(",".join(sorted(str(x) for x in arg)))
+            else:
+                key_parts.append(str(arg))
         key_parts.extend(f"{k}={v}" for k, v in sorted(kwargs.items()))
-        key_str = "|".join(key_parts)
-        
-        # 使用 MD5 生成固定长度的 key
-        return hashlib.md5(key_str.encode()).hexdigest()
-    
+        return hashlib.md5("|".join(key_parts).encode()).hexdigest()
+
     def get(self, key: str) -> Optional[Any]:
-        """获取缓存值，如果过期返回 None"""
-        if key not in self._cache:
-            return None
-        
-        entry = self._cache[key]
-        if time.time() > entry['expires_at']:
-            # 已过期，删除并返回 None
-            del self._cache[key]
-            return None
-        
-        return entry['value']
-    
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                return None
+            if time.time() > entry['expires_at']:
+                del self._cache[key]
+                return None
+            # LRU: 移到末尾（dict 保持插入序，末尾=最近使用）
+            self._cache.move_to_end(key)
+            return entry['value']
+
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
-        """设置缓存值"""
-        ttl = ttl if ttl is not None else self.default_ttl
-        expires_at = time.time() + ttl
-        
-        self._cache[key] = {
-            'value': value,
-            'expires_at': expires_at,
-            'created_at': time.time()
-        }
-    
+        with self._lock:
+            ttl = ttl if ttl is not None else self.default_ttl
+            self._cache[key] = {
+                'value': value,
+                'expires_at': time.time() + ttl,
+                'created_at': time.time(),
+            }
+            # LRU 淘汰：超容量时删除最旧条目
+            while len(self._cache) > self.max_size:
+                self._cache.popitem(last=False)
+
     def clear(self) -> None:
-        """清空所有缓存"""
-        self._cache.clear()
-    
+        with self._lock:
+            self._cache.clear()
+
     def clear_expired(self) -> int:
-        """清理所有过期的缓存，返回清理数量"""
-        expired_keys = []
-        current_time = time.time()
-        
-        for key, entry in self._cache.items():
-            if current_time > entry['expires_at']:
-                expired_keys.append(key)
-        
-        for key in expired_keys:
-            del self._cache[key]
+        with self._lock:
+            now = time.time()
+            expired = [k for k, e in self._cache.items() if now > e['expires_at']]
+            for k in expired:
+                del self._cache[k]
+            return len(expired)
         
         return len(expired_keys)
     
     def stats(self) -> Dict[str, Any]:
-        """返回缓存统计信息"""
-        current_time = time.time()
-        valid_count = 0
-        expired_count = 0
-        
-        for key, entry in self._cache.items():
-            if current_time > entry['expires_at']:
-                expired_count += 1
-            else:
-                valid_count += 1
-        
-        return {
-            'total': len(self._cache),
-            'valid': valid_count,
-            'expired': expired_count,
-            'size_bytes': sum(len(json.dumps(v['value'])) for v in self._cache.values())
-        }
+        with self._lock:
+            now = time.time()
+            valid = sum(1 for e in self._cache.values() if now <= e['expires_at'])
+            return {
+                'total': len(self._cache),
+                'valid': valid,
+                'expired': len(self._cache) - valid,
+                'max_size': self.max_size,
+            }
 
 
 # 创建全局缓存实例（TTL 统一由 config.py 管理）

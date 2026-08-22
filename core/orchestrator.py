@@ -191,6 +191,35 @@ class Orchestrator:
 
     # ── 工作流执行 ────────────────────────────────────────────────
 
+    def _run_parallel_steps(self, steps: List[WorkflowStep], context: Dict,
+                            workflow_name: str, start_index: int) -> List[Dict]:
+        """并行执行无依赖的步骤（ThreadPoolExecutor）"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _run_one(step: WorkflowStep, idx: int) -> Dict:
+            task = {
+                "task_name": f"{workflow_name}_step{start_index + idx}",
+                "step_index": start_index + idx,
+                "workflow": workflow_name,
+                **context,
+            }
+            output = self.run_agent(step.agent, task)
+            return {
+                "step": start_index + idx,
+                "agent": step.agent,
+                "success": output.success,
+                "attempt": 1,
+                "data": output.data,
+            }
+
+        batch_results = [None] * len(steps)
+        with ThreadPoolExecutor(max_workers=len(steps)) as pool:
+            futures = {pool.submit(_run_one, step, idx): idx for idx, step in enumerate(steps)}
+            for future in as_completed(futures):
+                idx = futures[future]
+                batch_results[idx] = future.result()
+        return batch_results
+
     def execute_workflow(self, workflow_name: str, params: Dict = None) -> Dict:
         """同步执行工作流（逐步执行，支持 REJECT 反馈循环）"""
         workflow = self._workflows.get(workflow_name)
@@ -211,7 +240,30 @@ class Orchestrator:
         context = dict(params)  # 工作流上下文，逐步累积
         results = []
 
-        for i, step in enumerate(workflow.steps):
+        # 分组：连续无 input_from 的步骤可并行执行
+        i = 0
+        while i < len(workflow.steps):
+            step = workflow.steps[i]
+
+            # 检查是否可以与后续步骤并行（均无 input_from）
+            parallel_group = [step]
+            j = i + 1
+            while j < len(workflow.steps) and workflow.steps[j].input_from is None:
+                parallel_group.append(workflow.steps[j])
+                j += 1
+
+            if len(parallel_group) > 1:
+                # 并行执行独立步骤
+                logger.info(f"[Orchestrator] parallel batch: {[s.agent for s in parallel_group]}")
+                batch_results = self._run_parallel_steps(parallel_group, context, workflow_name, i)
+                results.extend(batch_results)
+                for idx, r in enumerate(batch_results):
+                    if r.get("success"):
+                        context[f"output_{parallel_group[idx].agent}"] = r.get("data", {})
+                i = j
+                continue
+
+            # 单步执行（原有逻辑）
             agent = self.registry.get(step.agent)
             if agent is None:
                 logger.error(f"[Orchestrator] step {i}: agent not found: {step.agent}")
@@ -278,6 +330,8 @@ class Orchestrator:
                     break
                 else:
                     break
+
+            i += 1
 
         # 发布工作流完成事件
         self.event_bus.publish_sync(Event(
