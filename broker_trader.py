@@ -26,7 +26,48 @@ except ImportError:
     print("[警告] efinance 未安装，模拟盘功能受限。安装: pip install efinance")
 
 
-class MockTrader:
+class BaseTrader:
+    """交易接口基类（统一接口约定 + 公共交易日志）
+
+    子类必须实现: get_balance / get_positions / buy / sell
+    """
+
+    trade_log_file = "history/trades.json"
+
+    def get_balance(self) -> Dict:
+        raise NotImplementedError
+
+    def get_positions(self) -> List[Dict]:
+        raise NotImplementedError
+
+    def buy(self, stock_code: str, price: float, shares: int) -> Dict:
+        raise NotImplementedError
+
+    def sell(self, stock_code: str, price: float, shares: int) -> Dict:
+        raise NotImplementedError
+
+    def _log_trade(self, action: str, code: str, name: str, price: float,
+                   shares: int, pnl: float = 0, order_id: str = ""):
+        """记录交易到日志（safe_update_json 带文件锁，并发安全）"""
+        from safe_io import safe_update_json
+        os.makedirs(os.path.dirname(self.trade_log_file) or ".", exist_ok=True)
+        safe_update_json(
+            self.trade_log_file,
+            lambda trades: trades + [{
+                "datetime": datetime.now().isoformat(),
+                "action": action,
+                "code": code,
+                "name": name,
+                "price": price,
+                "shares": shares,
+                "pnl": round(pnl, 2),
+                "order_id": order_id,
+            }],
+            default=[],
+        )
+
+
+class MockTrader(BaseTrader):
     """模拟盘交易接口（使用本地 portfolio.json）"""
 
     def __init__(self, portfolio_file="portfolio.json"):
@@ -108,28 +149,8 @@ class MockTrader:
         else:
             return {"success": False, "message": result["error"]}
 
-    def _log_trade(self, action: str, code: str, name: str, price: float, shares: int, pnl: float = 0):
-        """记录交易"""
-        trades = []
-        if os.path.exists(self.trade_log_file):
-            with open(self.trade_log_file, "r", encoding="utf-8") as f:
-                trades = json.load(f)
 
-        trades.append({
-            "datetime": datetime.now().isoformat(),
-            "action": action,
-            "code": code,
-            "name": name,
-            "price": price,
-            "shares": shares,
-            "pnl": round(pnl, 2)
-        })
-
-        with open(self.trade_log_file, "w", encoding="utf-8") as f:
-            json.dump(trades, f, ensure_ascii=False, indent=2)
-
-
-class EFinanceTrader:
+class EFinanceTrader(BaseTrader):
     """东方财富模拟盘接口（基于 efinance）"""
 
     def __init__(self):
@@ -232,7 +253,7 @@ class EFinanceTrader:
             print(f"更新价格失败: {e}")
 
 
-class RealTrader:
+class RealTrader(BaseTrader):
     """实盘交易接口（需配置券商账户）
 
     支持:
@@ -294,24 +315,6 @@ class RealTrader:
             return answer in ("yes", "y", "是")
         except Exception:
             return False
-
-    def _log_trade(self, action: str, code: str, name: str, price: float, shares: int, pnl: float = 0, order_id: str = ""):
-        """记录实盘交易到日志"""
-        from safe_io import safe_update_json
-        safe_update_json(
-            self.trade_log_file,
-            lambda trades: trades + [{
-                "datetime": datetime.now().isoformat(),
-                "action": action,
-                "code": code,
-                "name": name,
-                "price": price,
-                "shares": shares,
-                "pnl": round(pnl, 2),
-                "order_id": order_id,
-            }],
-            default=[],
-        )
 
     def get_balance(self) -> Dict:
         """获取资金余额"""
@@ -392,8 +395,8 @@ class RealTrader:
             stock_name = stock_code
             pnl = 0.0
             try:
-                portfolio = pt.load_portfolio() if 'pt' in dir() else {}
-                pos = portfolio.get("positions", {}).get(stock_code, {})
+                from portfolio_tracker import load_portfolio
+                pos = load_portfolio().get("positions", {}).get(stock_code, {})
                 stock_name = pos.get("name", stock_code)
                 if pos:
                     pnl = (price - pos.get("avg_cost", price)) * shares
