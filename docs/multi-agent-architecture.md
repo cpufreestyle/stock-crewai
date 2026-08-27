@@ -124,7 +124,7 @@ stock-crewai/
 │   ├── agent_base.py              # Agent 基类（统一接口）
 │   └── tool_registry.py           # 工具注册表（动态发现）
 │
-├── agents/                        # 重构：从 agents.py 拆分
+├── agents/                        # Agent 定义包（唯一生效）
 │   ├── market_watcher.py          # 市场观察员（+ 工具）
 │   ├── researcher.py              # 选股研究员（+ 工具）
 │   ├── risk_manager.py            # 风控专家（+ 工具 + REJECT 能力）

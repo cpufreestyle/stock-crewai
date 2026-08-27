@@ -224,7 +224,6 @@ python gm_broker.py
 - ✅ **新增 BacktestAgent**：策略回测验证、指标评分
 - ✅ **新增 ReviewAgent**：合规审核、否决权
 - ✅ **12 步骤工作流**：全自动化交易流程
-- ✅ **322 行新代码**：agents.py +136, tasks.py +120, crew.py +76
 
 ### v4.1.1 (2026-06-09)
 - ✅ 切换 LM Studio 直连

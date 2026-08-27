@@ -20,9 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/
 
-# 额外安装 headroom-ai（token 压缩）
-RUN pip install --no-cache-dir headroom-ai -i https://pypi.tuna.tsinghua.edu.cn/simple/
-
 # 复制项目代码（含多 Agent 结构）
 RUN mkdir -p /app/core /app/agents /app/tools /app/workflows /app/templates /app/static /app/harness
 COPY *.py .

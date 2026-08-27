@@ -35,20 +35,16 @@ jobs:
           pip install pytest pytest-cov black isort flake8
 
       - name: Check code format (Black)
-        run: |
-          black --check . || true
+        run: black --check .
 
       - name: Check import order (isort)
-        run: |
-          isort --check-only --diff . || true
+        run: isort --check-only --diff .
 
       - name: Lint (flake8)
-        run: |
-          flake8 . --max-line-length=120 --ignore=E501,W503 --exclude=__pycache__,.git,.github || true
+        run: flake8 . --max-line-length=120 --ignore=E501,W503 --exclude=__pycache__,.git,.github
 
       - name: Run tests
-        run: |
-          pytest tests/ -v --tb=short
+        run: pytest tests/ -v --tb=short --cov=. --cov-report=html:htmlcov --cov-config=pytest.ini
 
       - name: Upload coverage
         if: always()
@@ -98,8 +94,3 @@ jobs:
       - name: Check docs exist
         run: |
           test -d docs && echo "docs/ directory exists" || echo "No docs/ directory"
-
-      - name: Check OpenAPI spec
-        if: false
-        run: |
-          test -f docs/openapi.yaml && echo "OpenAPI spec exists" || echo "No OpenAPI spec"

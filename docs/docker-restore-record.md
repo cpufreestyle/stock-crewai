@@ -2,8 +2,7 @@
 
 ## 问题诊断
 - **Docker 镜像为空**：`docker images` 和 `docker ps -a` 均无结果
-- **build 失败原因 1**：`agents/` 目录为空（Agent 文件在 `agents_pkg/` 中）
-  - 修复：`Copy-Item agents_pkg\* agents\ -Recurse`
+- **build 失败原因 1**：`agents/` 目录与 `agents_pkg/` 重复（`agents_pkg/` 已于 2026-08-15 清理删除，`agents/` 为唯一生效包）
 - **build 失败原因 2**：`.dockerignore` GBK 编码乱码导致解析异常
   - 修复：重写为纯 UTF-8
 - **build 被 SIGKILL 原因**：完整 `requirements.txt` 含 crewai/akshare/chromadb/lancedb/onnxruntime 等，总计 200+ 包 ~500MB，下载超时

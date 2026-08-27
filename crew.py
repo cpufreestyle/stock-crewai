@@ -236,8 +236,10 @@ def format_wechat_message(result: dict) -> str:
     return msg
 
 
-def send_wechat(message: str, target: str = "315113118"):
+def send_wechat(message: str, target: str = None):
     """发送微信消息（使用 openclaw message 工具）"""
+    if target is None:
+        target = os.getenv("WECHAT_TARGET", "")
     import shutil
     exe = shutil.which("openclaw") or shutil.which("openclaw.cmd")
     if not exe:
@@ -263,7 +265,7 @@ def send_wechat(message: str, target: str = "315113118"):
         return False
 
 
-def run_simple_analysis(target: str = "315113118") -> str:
+def run_simple_analysis(target: str = None) -> str:
     """运行简化分析（单次 LLM 调用）"""
     print(f"\n{'='*60}")
     print(f"  简化版炒股分析 - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
@@ -336,8 +338,8 @@ if __name__ == "__main__":
     if sys.stderr.encoding != 'utf-8':
         sys.stderr.reconfigure(encoding='utf-8')
     
-    # 命令行参数：目标微信ID
-    target = sys.argv[1] if len(sys.argv) > 1 else "315113118"
+    # 命令行参数：目标微信ID（默认从 .env 读取）
+    target = sys.argv[1] if len(sys.argv) > 1 else os.getenv("WECHAT_TARGET", "")
     
     result = run_simple_analysis(target)
     print(f"\n{'='*60}")
