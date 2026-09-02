@@ -1,6 +1,11 @@
-"""企业微信通知模块（统一通知入口）
+"""企业微信 + 个人微信通知模块（统一通知入口）
 
-WEBHOOK_URL 从 .env 读取（WECHAT_WEBHOOK_URL），未配置时自动跳过。
+双通道：
+1. 企业微信群机器人：.env 的 WECHAT_WEBHOOK_URL
+2. Server酱（个人微信）：.env 的 SERVERCHAN_SENDKEY，消息直达个人微信
+   （sct.ftqq.com 用目标微信扫码登录获取 SendKey）
+
+任一通道未配置自动跳过；两通道独立失败互不影响。
 alert.py 的 Server酱/Webhook 渠道也委托到此处。
 """
 import sys; sys.stdout.reconfigure(encoding='utf-8')
@@ -14,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 # 企业微信 webhook 地址（从 .env 读取）
 WEBHOOK_URL = os.getenv("WECHAT_WEBHOOK_URL", "")
+# Server酱 SendKey（从 .env 读取，推送到个人微信）
+SERVERCHAN_SENDKEY = os.getenv("SERVERCHAN_SENDKEY", "")
 
 
 def _get_webhook() -> str:
@@ -21,60 +28,78 @@ def _get_webhook() -> str:
     return os.getenv("WECHAT_WEBHOOK_URL", WEBHOOK_URL)
 
 
-def send_text(content: str):
-    """发送文本消息"""
-    url = _get_webhook()
-    if not url:
-        logger.info("[通知] Webhook未配置，跳过")
+def _get_serverchan_key() -> str:
+    """延迟读取 Server酱 SendKey"""
+    return os.getenv("SERVERCHAN_SENDKEY", SERVERCHAN_SENDKEY)
+
+
+def _send_serverchan(title: str, content: str) -> bool:
+    """Server酱推送（直达个人微信），content 支持 Markdown"""
+    key = _get_serverchan_key()
+    if not key:
         return False
-
-    data = {
-        "msgtype": "text",
-        "text": {
-            "content": content
-        }
-    }
-
     try:
-        r = requests.post(WEBHOOK_URL, json=data, timeout=5)
-        result = r.json()
-        if result.get("errcode") == 0:
-            print("[通知] 发送成功")
+        r = requests.post(
+            f"https://sctapi.ftqq.com/{key}.send",
+            data={"title": title[:32], "desp": content[:3000]},
+            timeout=10,
+        )
+        if r.status_code == 200 and r.json().get("code") == 0:
+            logger.info("[通知] Server酱推送成功")
             return True
-        else:
-            print("[通知] 发送失败: " + str(result))
-            return False
-    except Exception as e:
-        print("[通知] 异常: " + str(e))
+        logger.warning("[通知] Server酱推送失败: %s", r.text[:200])
         return False
+    except Exception as e:
+        logger.warning("[通知] Server酱异常: %s", e)
+        return False
+
+
+def send_text(content: str):
+    """发送文本消息（双通道：企业微信群 + 个人微信）"""
+    sent = False
+    url = _get_webhook()
+    if url:
+        data = {"msgtype": "text", "text": {"content": content}}
+        try:
+            r = requests.post(url, json=data, timeout=5)
+            result = r.json()
+            if result.get("errcode") == 0:
+                print("[通知] 企业微信发送成功")
+                sent = True
+            else:
+                print("[通知] 企业微信发送失败: " + str(result))
+        except Exception as e:
+            print("[通知] 企业微信异常: " + str(e))
+    title = content.splitlines()[0][:32] if content else "通知"
+    if _send_serverchan(title, content):
+        sent = True
+    if not sent:
+        logger.info("[通知] 所有通道未配置或发送失败")
+    return sent
 
 
 def send_markdown(content: str):
-    """发送Markdown消息"""
+    """发送Markdown消息（双通道：企业微信群 + 个人微信）"""
+    sent = False
     url = _get_webhook()
-    if not url:
-        logger.info("[通知] Webhook未配置，跳过")
-        return False
-
-    data = {
-        "msgtype": "markdown",
-        "markdown": {
-            "content": content
-        }
-    }
-
-    try:
-        r = requests.post(WEBHOOK_URL, json=data, timeout=5)
-        result = r.json()
-        if result.get("errcode") == 0:
-            print("[通知] 发送成功")
-            return True
-        else:
-            print("[通知] 发送失败: " + str(result))
-            return False
-    except Exception as e:
-        print("[通知] 异常: " + str(e))
-        return False
+    if url:
+        data = {"msgtype": "markdown", "markdown": {"content": content}}
+        try:
+            r = requests.post(url, json=data, timeout=5)
+            result = r.json()
+            if result.get("errcode") == 0:
+                print("[通知] 企业微信发送成功")
+                sent = True
+            else:
+                print("[通知] 企业微信发送失败: " + str(result))
+        except Exception as e:
+            print("[通知] 企业微信异常: " + str(e))
+    title = content.splitlines()[0].lstrip("#").strip()[:32] if content else "通知"
+    if _send_serverchan(title, content):
+        sent = True
+    if not sent:
+        logger.info("[通知] 所有通道未配置或发送失败")
+    return sent
 
 
 def notify_buy(stock_code: str, stock_name: str, shares: int, price: float, reason: str = ""):
