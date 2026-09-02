@@ -306,9 +306,31 @@ class RealTrader(BaseTrader):
             print(f"[错误] 实盘接口初始化失败: {e}")
 
     def _confirm(self, action: str, code: str, price: float, shares: int) -> bool:
-        """实盘交易确认（可通过 LIVE_TRADE_CONFIRM 关闭）"""
+        """实盘交易确认（可通过 LIVE_TRADE_CONFIRM 关闭）
+
+        非交互模式（无 TTY，如循环/服务进程）下不阻塞也不盲目放行：
+        拒绝下单并发送微信告警，等待人工处理。
+        """
         if not self.require_confirm:
             return True
+
+        # 非交互环境检测：stdin 非 TTY 时降级为拒绝+告警
+        import sys as _sys
+        try:
+            if not _sys.stdin or not _sys.stdin.isatty():
+                warn = (f"实盘{action}请求需人工确认但运行于非交互模式，已拒绝: "
+                        f"{code} {shares}股@{price:.2f}（金额 {price*shares:.2f}元）。"
+                        f"请手动处理，或将 LIVE_TRADE_CONFIRM 设为 false（风险自负）")
+                print(f"[实盘] ⛔ {warn}")
+                try:
+                    import wechat_notifier as _wn
+                    _wn.notify_error(warn)
+                except Exception:
+                    pass
+                return False
+        except Exception:
+            pass  # TTY 检测失败则按原逻辑走 input()
+
         msg = f"\n{'='*50}\n⚠️ 实盘交易确认\n{'='*50}\n操作: {action}\n股票: {code}\n价格: {price:.2f}\n数量: {shares}股\n金额: {price*shares:.2f}元\n{'='*50}\n确认执行? (yes/no): "
         try:
             answer = input(msg).strip().lower()

@@ -24,7 +24,7 @@ timeout /t 3 /nobreak >nul
 
 REM 检查 Harness 状态
 echo [2/2] 检查 Harness 状态...
-python harness_guard.py
+py -3.11 harness_guard.py
 
 echo.
 echo ====================================

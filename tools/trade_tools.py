@@ -62,6 +62,15 @@ class ExecuteBuyTool(BaseTool):
                 if shares <= 0:
                     return json.dumps({"error": "shares less than 100"}, ensure_ascii=False)
 
+            # 熔断检查（实盘与虚拟盘统一防线）
+            try:
+                import trade_guards as tg
+                allowed, reason = tg.check_circuit_breaker()
+                if not allowed:
+                    return json.dumps({"success": False, "error": f"熔断中，禁止买入: {reason}"}, ensure_ascii=False)
+            except ImportError:
+                pass
+
             # Get realtime price (if price=0, use current price)
             current_prices = {}
             if price == 0:

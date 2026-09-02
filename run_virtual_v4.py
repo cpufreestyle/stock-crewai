@@ -58,6 +58,14 @@ except Exception as e:
     TECH_AVAILABLE = False
     print(f"[警告] 技术指标模块不可用: {e}")
 
+# 交易防护（熔断/价格校验）
+try:
+    import trade_guards as tg
+    GUARDS_AVAILABLE = True
+except Exception as e:
+    GUARDS_AVAILABLE = False
+    print(f"[警告] 交易防护模块不可用: {e}")
+
 
 # ========== 进程互斥锁 ==========
 lock_socket = None
@@ -240,6 +248,16 @@ def execute_sell(portfolio_positions, alerts, realtime_data):
         if price <= 0:
             continue
         
+        # 价格合理性校验（涨跌停/异常行情防护）
+        if GUARDS_AVAILABLE:
+            valid, reason = tg.validate_price(
+                code, price,
+                prev_close=tg.get_prev_close(code, realtime_data),
+            )
+            if not valid:
+                print(f"[防护] 卖出 {pos['name']} 跳过: {reason}")
+                continue
+        
         result = pt.update_position(
             stock_code=code,
             stock_name=pos["name"],
@@ -390,6 +408,18 @@ def execute_buy(candidates, portfolio_positions, cash, total_capital, realtime_d
     """执行买入（含通知）"""
     buys = []
     
+    # 熔断检查：触发时禁止新开仓（卖出不受限，允许止损离场）
+    if GUARDS_AVAILABLE:
+        allowed, reason = tg.check_circuit_breaker()
+        if not allowed:
+            print(f"[防护] 熔断中，跳过本次买入: {reason}")
+            if NOTIFIER_AVAILABLE:
+                try:
+                    wn.notify_error(f"熔断中，暂停新开仓: {reason}")
+                except Exception:
+                    pass
+            return buys
+    
     position_count = len(portfolio_positions)
     max_positions = MAX_POSITIONS
     
@@ -417,6 +447,17 @@ def execute_buy(candidates, portfolio_positions, cash, total_capital, realtime_d
         
         if price <= 0:
             continue
+        
+        # 价格合理性校验（涨跌停/stale quote 防护）
+        if GUARDS_AVAILABLE:
+            valid, reason = tg.validate_price(
+                cand["code"], price,
+                prev_close=tg.get_prev_close(cand["code"], realtime_data),
+                reference_price=cand.get("price"),
+            )
+            if not valid:
+                print(f"[防护] 买入 {cand['name']} 跳过: {reason}")
+                continue
         
         # 计算动态止损止盈
         if TECH_AVAILABLE:
@@ -561,6 +602,12 @@ def run_once():
     positions = portfolio.get("positions", {})
     cash = portfolio.get("cash", 100000)
     total_capital = portfolio.get("total_capital", 100000)
+    
+    # 熔断状态检查（买入会被 execute_buy 拦截，止损卖出始终放行）
+    if GUARDS_AVAILABLE:
+        tripped, cb_reason = tg.check_circuit_breaker(portfolio.get("total_value"))
+        if not tripped:
+            print(f"[防护] ⛔ {cb_reason}——本次仅允许止损/止盈卖出，禁止新开仓\n")
     
     # 市场状态
     market_regime = df.get_simple_market_regime()
