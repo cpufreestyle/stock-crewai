@@ -95,6 +95,8 @@ API_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1")
 # ========================
 # mock: 本地模拟盘 | efinance: 东方财富模拟盘 | real: 实盘
 TRADING_MODE = os.getenv("TRADING_MODE", "mock").strip().lower()
+# 信号推送模式 (true=只推送交易建议到微信，不自动交易；需配置 WECHAT_WEBHOOK_URL)
+SIGNAL_ONLY_MODE = os.getenv("SIGNAL_ONLY", "false").strip().lower() == "true"
 # 实盘券商代码 (ht=华泰, dfcf=东方财富, ths=同花顺)
 BROKER_CODE = os.getenv("BROKER_CODE", "ht")
 # 实盘交易确认 (true=需人工确认, false=全自动)

@@ -40,6 +40,7 @@ from config import (
     GOOD_CHANGE_LOW, GOOD_CHANGE_HIGH, MIN_TECH_SCORE,
     NEAR_TAKE_PROFIT_PCT, ATR_STOP_LOSS_ENABLED,
     LOG_MAX_BYTES, LOG_BACKUP_COUNT, NET_VALUE_HISTORY_FILE,
+    SIGNAL_ONLY_MODE,
 )
 
 # 尝试导入通知模块
@@ -588,11 +589,64 @@ def calculate_performance_metrics():
     }
 
 
+# ========== 信号推送模式 ==========
+def format_signals_message(alerts, candidates):
+    """构建信号推送消息（纯函数，便于测试）
+
+    Args:
+        alerts: check_portfolio_risk 输出（含 STOP_LOSS/TAKE_PROFIT/WARNING）
+        candidates: advanced_filter 输出（按 tech_score 排序的买入候选）
+
+    Returns:
+        (markdown消息, 信号条数)；无信号返回 (None, 0)
+    """
+    sell_signals = [a for a in alerts if a.get("action") in ("STOP_LOSS", "TAKE_PROFIT")]
+    buy_signals = candidates[:3]
+    if not sell_signals and not buy_signals:
+        return None, 0
+
+    lines = ["### 📡 交易信号（人工执行模式）", ""]
+    for a in sell_signals:
+        icon = "🛑 **止损卖出**" if a["action"] == "STOP_LOSS" else "🎯 **止盈卖出**"
+        lines.append(f"- {icon} {a['name']}({a['code']}) 建议清仓 {a['price']:.2f}元 — {a['reason']}")
+
+    for c in buy_signals:
+        price = c["price"]
+        stop_loss = round(price * STOP_LOSS_RATIO, 2)
+        take_profit = round(price * TAKE_PROFIT_RATIO, 2)
+        lines.append(
+            f"- 📈 **建议买入** {c['name']}({c['code']}) 约 {c['shares']}股 @ {price:.2f}元"
+            f"（止损{stop_loss} 目标{take_profit} 评分{c['tech_score']}）"
+        )
+
+    lines.append("")
+    lines.append(f"_{datetime.now().strftime('%H:%M')} 推送，请人工确认后执行_")
+    return "\n".join(lines), len(sell_signals) + len(buy_signals)
+
+
+def push_signals(alerts, candidates):
+    """信号模式：合并推送买卖建议到微信。返回推送条数（0=未推送）"""
+    msg, count = format_signals_message(alerts, candidates)
+    if msg is None:
+        return 0
+    if not NOTIFIER_AVAILABLE:
+        print("[信号模式] 通知模块不可用，信号未推送")
+        return 0
+    try:
+        if wn.send_markdown(msg):
+            print(f"[信号模式] 已推送 {count} 条交易建议")
+            return count
+    except Exception as e:
+        print(f"[信号模式] 推送失败: {e}")
+    return 0
+
+
 # ========== 主运行函数 ==========
 def run_once():
     """单次运行"""
     print("\n" + "=" * 60)
-    print(f"  虚拟盘自动交易 v4.0 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
+    mode_label = "信号推送模式" if SIGNAL_ONLY_MODE else "自动交易模式"
+    print(f"  虚拟盘自动交易 v4.0 [{mode_label}] ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
     print("=" * 60 + "\n")
     
     # 清理过期日志
@@ -631,12 +685,15 @@ def run_once():
             icon = "🚨" if alert["action"] == "STOP_LOSS" else ("💰" if alert["action"] == "TAKE_PROFIT" else "⚠️")
             print(f"  {icon} {alert['name']}: {alert['reason']}")
         
-        sells = execute_sell(positions, alerts, realtime_data)
-        if sells:
-            print(f"\n已卖出 {len(sells)} 只股票")
-            for s in sells:
-                icon = "📉" if s["pnl"] < 0 else "📈"
-                print(f"  {icon} {s['name']}: {s['shares']}股 @ {s['price']:.2f}元 ({s['pnl']:+.2f}元)")
+        if SIGNAL_ONLY_MODE:
+            print("  [信号模式] 卖出信号将合并推送，不自动执行")
+        else:
+            sells = execute_sell(positions, alerts, realtime_data)
+            if sells:
+                print(f"\n已卖出 {len(sells)} 只股票")
+                for s in sells:
+                    icon = "📉" if s["pnl"] < 0 else "📈"
+                    print(f"  {icon} {s['name']}: {s['shares']}股 @ {s['price']:.2f}元 ({s['pnl']:+.2f}元)")
     else:
         print("  无风险信号\n")
     
@@ -649,7 +706,14 @@ def run_once():
     print("\n=== 筛选买入候选 ===")
     candidates = advanced_filter(realtime_data, positions, cash, total_capital)
     
-    if candidates:
+    if SIGNAL_ONLY_MODE:
+        # 信号推送模式：合并推送买卖建议，不自动交易
+        if candidates:
+            print(f"候选 {len(candidates)} 只，选取前 3 只:")
+            for i, cand in enumerate(candidates[:3], 1):
+                print(f"  {i}. {cand['name']}: {cand['price']:.2f}元 (+{cand['change_pct']:.2f}%) 评分{cand['tech_score']}")
+        push_signals(alerts, candidates)
+    elif candidates:
         print(f"候选 {len(candidates)} 只，选取前 3 只:")
         for i, cand in enumerate(candidates[:3], 1):
             print(f"  {i}. {cand['name']}: {cand['price']:.2f}元 (+{cand['change_pct']:.2f}%) 评分{cand['tech_score']}")
@@ -706,6 +770,7 @@ def run_once():
     with open(log_file, "w", encoding="utf-8") as f:
         json.dump({
             "timestamp": datetime.now().isoformat(),
+            "mode": "signal_only" if SIGNAL_ONLY_MODE else "auto",
             "portfolio": portfolio,
             "candidates": candidates[:5] if candidates else [],
             "alerts": alerts,
