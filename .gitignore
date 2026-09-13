@@ -94,3 +94,4 @@ circuit_breaker_state.json
 
 # Codely CLI 会话数据
 .codely-cli/
+.codely/
