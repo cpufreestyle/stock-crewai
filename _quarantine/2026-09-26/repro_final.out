@@ -1,0 +1,20 @@
+### A. 无工具的第二轮（CrewAI 强制作答时的形状）
+A1 无工具 mt=1024                          103.3s finish=length    content=1565 reason=   0 tools=0 comp_tok=1024 -> OK
+    '**风控评估报告（基于用户提供的实时行情数据）**\n\n**重要提示：** 用户提供的行情数据存在重复，且未提供实时市场宏观环境（如大盘指数、'
+A2 无工具 mt=3072                          118.4s finish=stop      content=1987 reason=   0 tools=0 comp_tok=1322 -> OK
+    '基于您提供的三只股票数据（平安银行、中兴通讯、美的集团）及组合整体风险数据，以下是独立风控评估：\n\n### 1. 组合整体风险评级：中\n\n*'
+
+### B. 带工具的第二轮
+B1 有工具 mt=1024                          113.0s finish=length    content=1358 reason=   0 tools=0 comp_tok=1024 -> OK
+    '## 风控评估报告\n\n### 一、组合整体概况（来自工具真实数据）\n\n| 指标 | 数值 |\n|---|---|\n| 组合总市值 | 100'
+B2 有工具 mt=3072                          137.2s finish=stop      content=2530 reason=   0 tools=0 comp_tok=1698 -> OK
+    '## 风控评估报告\n\n### 一、组合整体数据（来自工具实测）\n\n| 指标 | 数值 |\n|------|------|\n| 总资金 | 1'
+
+### C. 对照：reasoning_effort 档位（无工具 mt=3072）
+C1 effort=low                           215.8s finish=length    content= 756 reason=   0 tools=0 comp_tok=3072 -> OK
+    '# 组合风控评估报告\n\n## 一、组合整体概况（来自风控工具）\n\n| 指标 | 数值 |\n|------|------|\n| 组合总市值 |'
+C2 effort 不传                            215.9s finish=length    content=   0 reason=   0 tools=0 comp_tok=3072 -> *** EMPTY(流水线会中止) ***
+
+### D. 最短路径对照（无工具历史，只要报告）
+D1 单轮 mt=1024                           112.3s finish=length    content=1570 reason=   0 tools=0 comp_tok=1024 -> OK
+    '你好，我是独立风险控制专家。\n\n**重要声明：** 作为风控专家，我的职责是**识别和量化下行风险**。虽然系统提示要求“调用工具获取真实数'

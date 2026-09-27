@@ -1,0 +1,361 @@
+openapi: 3.0.3
+info:
+  title: Stock CrewAI API
+  description: |
+    股票虚拟盘自动交易系统的 Web API 接口。
+    
+    ## 功能
+    - 持仓查询与管理
+    - 交易信号获取
+    - 绩效报告
+    - 实时行情
+    
+    ## 认证
+    所有 API 需要在请求头中包含 API Key：
+    ```
+    X-API-Key: your_api_key_here
+    ```
+  version: 1.0.0
+  contact:
+    name: Stock CrewAI
+    url: https://github.com/cpufreestyle/stock-crewai
+
+servers:
+  - url: http://localhost:5000
+    description: 本地开发服务器
+  - url: http://localhost:8080
+    description: Docker 部署服务器
+
+paths:
+  /api/positions:
+    get:
+      summary: 获取当前持仓
+      description: 返回所有当前持仓股票的信息
+      operationId: getPositions
+      tags:
+        - 持仓
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: 成功返回持仓列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  positions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Position'
+                  total_value:
+                    type: number
+                    description: 总持仓市值
+                  cash:
+                    type: number
+                    description: 可用资金
+                  total_assets:
+                    type: number
+                    description: 总资产
+
+  /api/orders:
+    get:
+      summary: 获取交易历史
+      description: 返回历史交易记录
+      operationId: getOrders
+      tags:
+        - 交易
+      parameters:
+        - name: stock_code
+          in: query
+          description: 股票代码（可选）
+          schema:
+            type: string
+            example: sh600519
+        - name: limit
+          in: query
+          description: 返回记录数
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: 成功返回交易记录
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  orders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+
+  /api/signal:
+    get:
+      summary: 获取选股信号
+      description: 基于技术指标返回选股信号
+      operationId: getSignal
+      tags:
+        - 选股
+      parameters:
+        - name: stock_code
+          in: query
+          required: true
+          description: 股票代码
+          schema:
+            type: string
+            example: sh600519
+      responses:
+        '200':
+          description: 成功返回信号
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  signal:
+                    $ref: '#/components/schemas/TradingSignal'
+
+  /api/portfolio:
+    get:
+      summary: 获取投资组合概览
+      description: 返回投资组合的整体表现
+      operationId: getPortfolio
+      tags:
+        - 组合
+      responses:
+        '200':
+          description: 成功返回组合信息
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  portfolio:
+                    $ref: '#/components/schemas/Portfolio'
+
+  /api/performance:
+    get:
+      summary: 获取绩效报告
+      description: 返回历史绩效统计数据
+      operationId: getPerformance
+      tags:
+        - 绩效
+      parameters:
+        - name: period
+          in: query
+          description: 时间周期
+          schema:
+            type: string
+            enum: [day, week, month, year, all]
+            default: all
+      responses:
+        '200':
+          description: 成功返回绩效报告
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  performance:
+                    $ref: '#/components/schemas/Performance'
+
+  /api/market:
+    get:
+      summary: 获取市场状态
+      description: 返回当前市场状态（牛熊市识别）
+      operationId: getMarketStatus
+      tags:
+        - 市场
+      responses:
+        '200':
+          description: 成功返回市场状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  market_status:
+                    type: string
+                    enum: [bull, bear, neutral]
+                  confidence:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    Position:
+      type: object
+      required:
+        - stock_code
+        - shares
+        - avg_cost
+      properties:
+        stock_code:
+          type: string
+          description: 股票代码
+          example: sh600519
+        stock_name:
+          type: string
+          description: 股票名称
+          example: 贵州茅台
+        shares:
+          type: integer
+          description: 持有股数
+        avg_cost:
+          type: number
+          description: 平均成本
+        current_price:
+          type: number
+          description: 当前价格
+        profit_loss:
+          type: number
+          description: 浮动盈亏金额
+        profit_loss_ratio:
+          type: number
+          description: 盈亏比例
+        position_ratio:
+          type: number
+          description: 仓位占比
+
+    Order:
+      type: object
+      properties:
+        order_id:
+          type: string
+          description: 订单ID
+        stock_code:
+          type: string
+          description: 股票代码
+        action:
+          type: string
+          enum: [buy, sell]
+          description: 交易动作
+        shares:
+          type: integer
+          description: 股数
+        price:
+          type: number
+          description: 成交价格
+        timestamp:
+          type: string
+          format: date-time
+          description: 成交时间
+        status:
+          type: string
+          enum: [pending, completed, cancelled]
+          description: 订单状态
+
+    TradingSignal:
+      type: object
+      properties:
+        stock_code:
+          type: string
+          description: 股票代码
+        action:
+          type: string
+          enum: [buy, sell, hold]
+          description: 交易建议
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: 信号置信度
+        reasons:
+          type: array
+          items:
+            type: string
+          description: 信号理由
+        indicators:
+          type: object
+          properties:
+            macd:
+              type: object
+            rsi:
+              type: number
+            kdj:
+              type: object
+            boll:
+              type: object
+
+    Portfolio:
+      type: object
+      properties:
+        initial_cash:
+          type: number
+          description: 初始资金
+        current_value:
+          type: number
+          description: 当前总价值
+        total_profit:
+          type: number
+          description: 总收益
+        total_profit_ratio:
+          type: number
+          description: 总收益率
+        win_rate:
+          type: number
+          description: 胜率
+        sharpe_ratio:
+          type: number
+          description: 夏普比率
+        max_drawdown:
+          type: number
+          description: 最大回撤
+
+    Performance:
+      type: object
+      properties:
+        period:
+          type: string
+          description: 统计周期
+        profit:
+          type: number
+          description: 收益金额
+        profit_ratio:
+          type: number
+          description: 收益率
+        trades:
+          type: integer
+          description: 交易次数
+        wins:
+          type: integer
+          description: 盈利次数
+        losses:
+          type: integer
+          description: 亏损次数
+
+tags:
+  - name: 持仓
+    description: 持仓查询与管理
+  - name: 交易
+    description: 交易记录查询
+  - name: 选股
+    description: 选股信号生成
+  - name: 组合
+    description: 投资组合管理
+  - name: 绩效
+    description: 绩效分析报告
+  - name: 市场
+    description: 市场状态分析

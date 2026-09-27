@@ -1,0 +1,195 @@
+{
+  "report": {
+    "initial_capital": 100000,
+    "final_value": 106908.0,
+    "total_return_pct": 6.91,
+    "max_drawdown_pct": 4.6,
+    "total_trades": 5,
+    "wins": 0,
+    "losses": 0,
+    "win_rate_pct": 0.0,
+    "trading_days": 17,
+    "start_date": "20260501",
+    "end_date": "20260525"
+  },
+  "daily_values": [
+    {
+      "date": "20260501",
+      "total_value": 100000.0,
+      "cash": 52576.0,
+      "position_value": 47424.0,
+      "return_pct": 0.0,
+      "positions_count": 1
+    },
+    {
+      "date": "20260504",
+      "total_value": 98512.0,
+      "cash": 27943.0,
+      "position_value": 70569.0,
+      "return_pct": -1.49,
+      "positions_count": 2
+    },
+    {
+      "date": "20260505",
+      "total_value": 99800.0,
+      "cash": 14008.0,
+      "position_value": 85792.0,
+      "return_pct": -0.2,
+      "positions_count": 3
+    },
+    {
+      "date": "20260506",
+      "total_value": 100364.0,
+      "cash": 9473.0,
+      "position_value": 90891.0,
+      "return_pct": 0.36,
+      "positions_count": 4
+    },
+    {
+      "date": "20260507",
+      "total_value": 103810.0,
+      "cash": 9473.0,
+      "position_value": 94337.0,
+      "return_pct": 3.81,
+      "positions_count": 4
+    },
+    {
+      "date": "20260508",
+      "total_value": 105176.0,
+      "cash": 5939.0,
+      "position_value": 99237.0,
+      "return_pct": 5.18,
+      "positions_count": 5
+    },
+    {
+      "date": "20260511",
+      "total_value": 104560.0,
+      "cash": 5939.0,
+      "position_value": 98621.0,
+      "return_pct": 4.56,
+      "positions_count": 5
+    },
+    {
+      "date": "20260512",
+      "total_value": 105960.0,
+      "cash": 5939.0,
+      "position_value": 100021.0,
+      "return_pct": 5.96,
+      "positions_count": 5
+    },
+    {
+      "date": "20260513",
+      "total_value": 104714.0,
+      "cash": 5939.0,
+      "position_value": 98775.0,
+      "return_pct": 4.71,
+      "positions_count": 5
+    },
+    {
+      "date": "20260514",
+      "total_value": 101215.0,
+      "cash": 5939.0,
+      "position_value": 95276.0,
+      "return_pct": 1.21,
+      "positions_count": 5
+    },
+    {
+      "date": "20260515",
+      "total_value": 101733.0,
+      "cash": 5939.0,
+      "position_value": 95794.0,
+      "return_pct": 1.73,
+      "positions_count": 5
+    },
+    {
+      "date": "20260518",
+      "total_value": 104869.0,
+      "cash": 5939.0,
+      "position_value": 98930.0,
+      "return_pct": 4.87,
+      "positions_count": 5
+    },
+    {
+      "date": "20260519",
+      "total_value": 101533.0,
+      "cash": 5939.0,
+      "position_value": 95594.0,
+      "return_pct": 1.53,
+      "positions_count": 5
+    },
+    {
+      "date": "20260520",
+      "total_value": 101086.0,
+      "cash": 5939.0,
+      "position_value": 95147.0,
+      "return_pct": 1.09,
+      "positions_count": 5
+    },
+    {
+      "date": "20260521",
+      "total_value": 102939.0,
+      "cash": 5939.0,
+      "position_value": 97000.0,
+      "return_pct": 2.94,
+      "positions_count": 5
+    },
+    {
+      "date": "20260522",
+      "total_value": 104874.0,
+      "cash": 5939.0,
+      "position_value": 98935.0,
+      "return_pct": 4.87,
+      "positions_count": 5
+    },
+    {
+      "date": "20260525",
+      "total_value": 106908.0,
+      "cash": 5939.0,
+      "position_value": 100969.0,
+      "return_pct": 6.91,
+      "positions_count": 5
+    }
+  ],
+  "trades": [
+    {
+      "date": "20260501",
+      "code": "sh600900",
+      "name": "长江电力",
+      "action": "buy",
+      "price": 29.64,
+      "shares": 1600
+    },
+    {
+      "date": "20260504",
+      "code": "sh600036",
+      "name": "招商银行",
+      "action": "buy",
+      "price": 35.19,
+      "shares": 700
+    },
+    {
+      "date": "20260505",
+      "code": "sh601012",
+      "name": "隆基绿能",
+      "action": "buy",
+      "price": 27.87,
+      "shares": 500
+    },
+    {
+      "date": "20260506",
+      "code": "sh601318",
+      "name": "中国平安",
+      "action": "buy",
+      "price": 45.35,
+      "shares": 100
+    },
+    {
+      "date": "20260508",
+      "code": "sz002475",
+      "name": "立讯精密",
+      "action": "buy",
+      "price": 35.34,
+      "shares": 100
+    }
+  ]
+}

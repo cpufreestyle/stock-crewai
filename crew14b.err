@@ -1,0 +1,309 @@
+ERROR:root:OpenAI: Error converting tool: OpenAI function name cannot be empty
+ERROR:root:OpenAI API call failed: OpenAI function name cannot be empty
+ERROR:crewai.flow.runtime:Error executing listener call_llm_native_tools: OpenAI function name cannot be empty
+ERROR:root:OpenAI: Error converting tool: OpenAI function name cannot be empty
+ERROR:root:OpenAI API call failed: OpenAI function name cannot be empty
+ERROR:crewai.flow.runtime:Error executing listener call_llm_native_tools: OpenAI function name cannot be empty
+ERROR:root:OpenAI: Error converting tool: OpenAI function name cannot be empty
+ERROR:root:OpenAI API call failed: OpenAI function name cannot be empty
+ERROR:crewai.flow.runtime:Error executing listener call_llm_native_tools: OpenAI function name cannot be empty
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2118, in kickoff
+    asyncio.get_running_loop()
+RuntimeError: no running event loop
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 903, in execute_task
+    result = self._execute_without_timeout(task_prompt, task)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 974, in _execute_without_timeout
+    invoke_result = self.agent_executor.invoke(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/experimental/agent_executor.py", line 2900, in invoke
+    self.kickoff()
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2123, in kickoff
+    return asyncio.run(_run_flow())
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2109, in _run_flow
+    return await self.kickoff_async(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2390, in kickoff_async
+    await asyncio.gather(*tasks)
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2853, in _execute_start_method
+    await self._execute_listeners(start_method_name, result, finished_event_id)
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3181, in _execute_listeners
+    ) = await self._execute_single_listener(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3393, in _execute_single_listener
+    await self._execute_listeners(
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3181, in _execute_listeners
+    ) = await self._execute_single_listener(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3389, in _execute_single_listener
+    listener_result, finished_event_id = await self._execute_method(
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3071, in _execute_method
+    raise e
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2972, in _execute_method
+    result = await asyncio.to_thread(ctx.run, method, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/flow_wrappers.py", line 101, in __call__
+    return self._meth(self._instance, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/experimental/agent_executor.py", line 1556, in call_llm_native_tools
+    answer = get_llm_response(
+             ^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/utilities/agent_utils.py", line 582, in get_llm_response
+    answer = llm.call(
+             ^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 480, in call
+    return self._call_completions(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 512, in _call_completions
+    completion_params = self._prepare_completion_params(
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 1836, in _prepare_completion_params
+    params["tools"] = self._convert_tools_for_interference(tools)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 1860, in _convert_tools_for_interference
+    name, description, parameters = safe_tool_conversion(tool, "OpenAI")
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/utils/common.py", line 140, in safe_tool_conversion
+    validated_name = validate_function_name(sanitized_name, provider)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/utils/common.py", line 23, in validate_function_name
+    raise ValueError(f"{provider} function name cannot be empty")
+ValueError: OpenAI function name cannot be empty
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2118, in kickoff
+    asyncio.get_running_loop()
+RuntimeError: no running event loop
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 903, in execute_task
+    result = self._execute_without_timeout(task_prompt, task)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 974, in _execute_without_timeout
+    invoke_result = self.agent_executor.invoke(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/experimental/agent_executor.py", line 2900, in invoke
+    self.kickoff()
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2123, in kickoff
+    return asyncio.run(_run_flow())
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2109, in _run_flow
+    return await self.kickoff_async(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2390, in kickoff_async
+    await asyncio.gather(*tasks)
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2853, in _execute_start_method
+    await self._execute_listeners(start_method_name, result, finished_event_id)
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3181, in _execute_listeners
+    ) = await self._execute_single_listener(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3393, in _execute_single_listener
+    await self._execute_listeners(
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3181, in _execute_listeners
+    ) = await self._execute_single_listener(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3389, in _execute_single_listener
+    listener_result, finished_event_id = await self._execute_method(
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3071, in _execute_method
+    raise e
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2972, in _execute_method
+    result = await asyncio.to_thread(ctx.run, method, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/flow_wrappers.py", line 101, in __call__
+    return self._meth(self._instance, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/experimental/agent_executor.py", line 1556, in call_llm_native_tools
+    answer = get_llm_response(
+             ^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/utilities/agent_utils.py", line 582, in get_llm_response
+    answer = llm.call(
+             ^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 480, in call
+    return self._call_completions(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 512, in _call_completions
+    completion_params = self._prepare_completion_params(
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 1836, in _prepare_completion_params
+    params["tools"] = self._convert_tools_for_interference(tools)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 1860, in _convert_tools_for_interference
+    name, description, parameters = safe_tool_conversion(tool, "OpenAI")
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/utils/common.py", line 140, in safe_tool_conversion
+    validated_name = validate_function_name(sanitized_name, provider)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/utils/common.py", line 23, in validate_function_name
+    raise ValueError(f"{provider} function name cannot be empty")
+ValueError: OpenAI function name cannot be empty
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2118, in kickoff
+    asyncio.get_running_loop()
+RuntimeError: no running event loop
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/app/crew.py", line 335, in <module>
+    result = run_daily_analysis(with_backtest=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/app/crew.py", line 260, in run_daily_analysis
+    result = crew.kickoff()
+             ^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/crew.py", line 1052, in kickoff
+    result = self._run_sequential_process()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/crew.py", line 1511, in _run_sequential_process
+    return self._execute_tasks(self.tasks)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/crew.py", line 1615, in _execute_tasks
+    task_output = task.execute_sync(
+                  ^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/task.py", line 593, in execute_sync
+    return self._execute_core(agent, context, tools)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/task.py", line 963, in _execute_core
+    raise e
+  File "/usr/local/lib/python3.11/site-packages/crewai/task.py", line 853, in _execute_core
+    result = agent.execute_task(
+             ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 917, in execute_task
+    return self._handle_execution_error(e, task, context, tools)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 801, in _handle_execution_error
+    return self.execute_task(task, context, tools)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 917, in execute_task
+    return self._handle_execution_error(e, task, context, tools)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 801, in _handle_execution_error
+    return self.execute_task(task, context, tools)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 917, in execute_task
+    return self._handle_execution_error(e, task, context, tools)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 800, in _handle_execution_error
+    self._check_execution_error(e, task)
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 780, in _check_execution_error
+    raise e
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 903, in execute_task
+    result = self._execute_without_timeout(task_prompt, task)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/agent/core.py", line 974, in _execute_without_timeout
+    invoke_result = self.agent_executor.invoke(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/experimental/agent_executor.py", line 2900, in invoke
+    self.kickoff()
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2123, in kickoff
+    return asyncio.run(_run_flow())
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/base_events.py", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2109, in _run_flow
+    return await self.kickoff_async(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2390, in kickoff_async
+    await asyncio.gather(*tasks)
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2853, in _execute_start_method
+    await self._execute_listeners(start_method_name, result, finished_event_id)
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3181, in _execute_listeners
+    ) = await self._execute_single_listener(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3393, in _execute_single_listener
+    await self._execute_listeners(
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3181, in _execute_listeners
+    ) = await self._execute_single_listener(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3389, in _execute_single_listener
+    listener_result, finished_event_id = await self._execute_method(
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 3071, in _execute_method
+    raise e
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/runtime/__init__.py", line 2972, in _execute_method
+    result = await asyncio.to_thread(ctx.run, method, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/flow/flow_wrappers.py", line 101, in __call__
+    return self._meth(self._instance, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/experimental/agent_executor.py", line 1556, in call_llm_native_tools
+    answer = get_llm_response(
+             ^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/utilities/agent_utils.py", line 582, in get_llm_response
+    answer = llm.call(
+             ^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 480, in call
+    return self._call_completions(
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 512, in _call_completions
+    completion_params = self._prepare_completion_params(
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 1836, in _prepare_completion_params
+    params["tools"] = self._convert_tools_for_interference(tools)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/openai/completion.py", line 1860, in _convert_tools_for_interference
+    name, description, parameters = safe_tool_conversion(tool, "OpenAI")
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/utils/common.py", line 140, in safe_tool_conversion
+    validated_name = validate_function_name(sanitized_name, provider)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/crewai/llms/providers/utils/common.py", line 23, in validate_function_name
+    raise ValueError(f"{provider} function name cannot be empty")
+ValueError: OpenAI function name cannot be empty

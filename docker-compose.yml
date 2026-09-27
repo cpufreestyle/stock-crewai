@@ -1,0 +1,71 @@
+services:
+  stock-crewai:
+    build: .
+    container_name: stock-crewai
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # 持久化：持仓数据 + 运行日志
+      - ./data:/app/data
+      - ./history:/app/history
+      - ./portfolio.json:/app/portfolio.json
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      # 持久化 Agent 状态库（含 -wal/-shm 一并落在挂载卷内）
+      - STATE_DB_PATH=/app/data/state.db
+    # 默认循环模式
+    command: ["python", "run_virtual_v4.py", "--loop"]
+
+  # CrewAI 多智能体分析（可选，每日运行）
+  stock-analyst:
+    build: .
+    container_name: stock-analyst
+    restart: "no"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./history:/app/history
+      - ./portfolio.json:/app/portfolio.json
+      - ./result_latest.md:/app/result_latest.md
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      - STATE_DB_PATH=/app/data/state.db
+    # 需要手动启动: docker compose run stock-analyst
+    command: ["python", "crew.py"]
+    profiles:
+      - analyst
+
+  # Web Dashboard（多 Agent 监控面板）
+  web-dashboard:
+    build: .
+    container_name: web-dashboard
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./history:/app/history
+      - ./portfolio.json:/app/portfolio.json
+      - ./result_latest.md:/app/result_latest.md
+      - ./templates:/app/templates
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      # 持久化 Agent 状态库（含 -wal/-shm 一并落在挂载卷内）
+      - STATE_DB_PATH=/app/data/state.db
+      - DASHBOARD_HOST=0.0.0.0
+      - DASHBOARD_PORT=5000
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:5000/api/health',timeout=5)"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 60s
+    # 启动多 Agent 主入口（含 Scheduler）
+    command: ["python", "main.py", "--dashboard"]

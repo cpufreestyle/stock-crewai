@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "projectName": "stock-crewai",
+  "generatedAt": "2026-05-24T02:05:09.248Z",
+  "rootNode": {
+    "id": "root",
+    "label": "stock-crewai",
+    "type": "root",
+    "status": "in_progress",
+    "progress": 0,
+    "children": [
+      {
+        "id": "mm-1",
+        "label": "技术栈",
+        "type": "module",
+        "status": "completed",
+        "progress": 100,
+        "children": [
+          {
+            "id": "mm-2",
+            "label": "Python",
+            "type": "concept",
+            "status": "completed",
+            "progress": 100,
+            "children": [],
+            "metadata": {
+              "description": "Technology: Python"
+            }
+          }
+        ],
+        "metadata": {
+          "description": "Detected: Python"
+        }
+      },
+      {
+        "id": "mm-3",
+        "label": "history",
+        "type": "module",
+        "status": "pending",
+        "progress": 0,
+        "children": [],
+        "metadata": {
+          "description": "Module: history"
+        }
+      },
+      {
+        "id": "mm-4",
+        "label": "recommendations",
+        "type": "module",
+        "status": "pending",
+        "progress": 0,
+        "children": [],
+        "metadata": {
+          "description": "Module: recommendations"
+        }
+      },
+      {
+        "id": "mm-5",
+        "label": "配置文件",
+        "type": "module",
+        "status": "pending",
+        "progress": 100,
+        "children": [
+          {
+            "id": "mm-6",
+            "label": "README.md",
+            "type": "file",
+            "status": "completed",
+            "progress": 100,
+            "children": [],
+            "metadata": {
+              "description": "Config: README.md"
+            }
+          }
+        ],
+        "metadata": {
+          "description": "Key configuration files"
+        }
+      },
+      {
+        "id": "mm-7",
+        "label": "开发阶段",
+        "type": "module",
+        "status": "in_progress",
+        "progress": 25,
+        "children": [
+          {
+            "id": "mm-8",
+            "label": "环境搭建与配置",
+            "type": "task",
+            "status": "completed",
+            "progress": 100,
+            "children": []
+          },
+          {
+            "id": "mm-9",
+            "label": "核心模块开发",
+            "type": "task",
+            "status": "in_progress",
+            "progress": 30,
+            "children": []
+          },
+          {
+            "id": "mm-10",
+            "label": "测试与质量保障",
+            "type": "task",
+            "status": "pending",
+            "progress": 0,
+            "children": []
+          },
+          {
+            "id": "mm-11",
+            "label": "文档与部署",
+            "type": "task",
+            "status": "pending",
+            "progress": 0,
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "sessionId": "mpj4vz7q9bkiot",
+  "projectPath": "D:\\qclaw-workspace\\stock-crewai",
+  "messages": [
+    {
+      "id": "mpj4vz7q25su5j",
+      "role": "system",
+      "content": "Claude Code 正在初始化...",
+      "timestamp": "2026-05-24T02:03:56.294Z"
+    },
+    {
+      "id": "mpj56sz4wthxg0",
+      "role": "user",
+      "content": "优化我的项目",
+      "timestamp": "2026-05-24T02:12:21.424Z"
+    },
+    {
+      "id": "mpj57bzk1l0k7x",
+      "role": "user",
+      "content": "1",
+      "timestamp": "2026-05-24T02:12:46.064Z"
+    }
+  ],
+  "startedAt": "2026-05-24T02:03:56.294Z"
+}

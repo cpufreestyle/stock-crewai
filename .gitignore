@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+
+# 敏感数据
+.env
+portfolio.json
+history/
+
+# 可执行文件
+*.exe
+*.msi
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swop
+*~
+
+# 日志
+*.log
+
+# Docker
+.docker/
+data/
+portfolio.json.example
+
+# 临时/调试文件
+temp_*.py
+test_*.py
+fix_*.py
+debug_*.py
+debug_*.json
+diagnose_*.py
+*_backup*.py
+*.backup*
+*_example.py
+*_integration*.py
+*_integration*.md
+*_integration*.json
+setup_scheduled_tasks.ps1
+launcher.py
+openclaw_alert.py
+memory_*.py
+memory_*.md
+signal_arena*.py
+sync_*.py
+wait_for_*.py
+monitor_*.py
+scheduled_check_*.py
+complete_fix.py
+net_value_history.json
+INTEGRATION_COMPLETE.md
+add_rotation_func.py
+agent_world_profile.json
+
+# docs 临时文档
+docs/integration-completion-report-*.md
+docs/automation-setup.md
+docs/windows-task-setup-manual.md
+docs/agent-world-integration.md
+docs/quick-reference.md
+
+# recommendations 历史 JSON
+recommendations/*.json
+
+# 备份文件
+*.bak
+
+# SQLite 临时文件
+*.db-shm
+*.db-wal
+*.db-journal
+
+# StepFun 等云端 key 的历史备份
+.env.bak*
+.env.bak-*
