@@ -1,2 +1,0 @@
-FROM https://huggingface.co/bartowski/Qwen3.8-27B-GGUF/resolve/main/Qwen3.8-27B-Q2_K.gguf
-PARAMETER num_ctx 16384

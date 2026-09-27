@@ -32,13 +32,13 @@ history/
 data/
 portfolio.json.example
 
-# 临时/调试文件
-temp_*.py
-test_*.py
-fix_*.py
-debug_*.py
-debug_*.json
-diagnose_*.py
+# 临时/调试文件（仅根目录；tests/ 目录必须可入库）
+/temp_*.py
+/test_*.py
+/fix_*.py
+/debug_*.py
+/debug_*.json
+/diagnose_*.py
 *_backup*.py
 *.backup*
 *_example.py
@@ -48,13 +48,13 @@ diagnose_*.py
 setup_scheduled_tasks.ps1
 launcher.py
 openclaw_alert.py
-memory_*.py
-memory_*.md
-signal_arena*.py
-sync_*.py
-wait_for_*.py
-monitor_*.py
-scheduled_check_*.py
+/memory_*.py
+/memory_*.md
+/signal_arena*.py
+/sync_*.py
+/wait_for_*.py
+/monitor_*.py
+/scheduled_check_*.py
 complete_fix.py
 net_value_history.json
 INTEGRATION_COMPLETE.md
@@ -74,6 +74,10 @@ recommendations/*.json
 # 备份文件
 *.bak
 
+# 日志/输出残留
+*.err
+*.out
+
 # SQLite 临时文件
 *.db-shm
 *.db-wal
@@ -82,3 +86,16 @@ recommendations/*.json
 # StepFun 等云端 key 的历史备份
 .env.bak*
 .env.bak-*
+
+# 本地隔离区（调试与归档残留，不入库）
+_quarantine/
+
+# 运行时数据库与缓存
+*.db
+cache/
+
+# 运行前组合备份快照
+portfolio.pre-*.json
+
+# DBVS 工具残留
+.dbvs*

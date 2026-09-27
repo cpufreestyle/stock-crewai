@@ -1,2 +1,0 @@
-FROM ./Qwen3.8-27B-Q2_K.gguf
-PARAMETER num_ctx 8192

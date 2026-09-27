@@ -1,8 +1,0 @@
-{
-  "model": "qwen3.8:q2",
-  "messages": [
-    {"role": "user", "content": "Reply with exactly the word: OK"}
-  ],
-  "think": false,
-  "max_tokens": 50
-}
