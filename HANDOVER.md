@@ -758,3 +758,25 @@ m.Completions.create = lambda self, *a, **kw: (CAPTURED.append(kw), (_Stop(),))[
   退出后自动卸载（显存回落到 882M）。下次真实触发：2026-09-28（周一）15:35。
 - 注意：通知走 openclaw 且设计上静默失败，本次 12:23 那轮没有新通知记录；
   报告/交易数据是权威凭证，通知只是附属。
+
+
+## 十五、仓库同步与可维护性整改（2026-09-27）
+
+- `.gitignore` 修复：`test_*.py` 等根目录临时文件规则原会误伤 `tests/` 整个目录，
+  导致 CI（pytest tests/）拉不到测试；已全部锚定根目录，并补充忽略 `*.err`/`*.out`、
+  `_quarantine/`、`*.db`、`cache/`、`portfolio.pre-*.json`、`.dbvs*` 等运行时产物。
+- 运行时数据取消追踪（磁盘保留，可随时再生）：state.db / stock_crewai.db、
+  cache/、portfolio.pre-run*、各类 .err/.out 日志残留、.dbvs*、_quarantine/2026-09-26。
+- 死代码归档到 `_quarantine/2026-09-27/dead-code/`：agents_pkg（被 agents/ 取代）、
+  run_virtual/v2/v3 + launch_virtual.bat + install_task.ps1（旧虚拟盘路线，计划任务
+  StockCrewAI_VirtualTrading 本机不存在）、probe_payload / verify_crewai_path /
+  smoke_test_crew / integrate_cache / virtual_trader。
+  `llm_analyst.py` 经引用核查是 web_dashboard `/api/run_analysis` 的后端，保留在根目录。
+  docker 栈（Dockerfile/compose/start.sh/run_loop.bat/run_virtual_v4.py）保持原样。
+- 测试：新增 `tests/test_trading_plan_and_cache.py` 29 个用例（schema 清洗/解析/
+  渲染、缓存 key/TTL/命中统计、make_cached_llm 装配）。全套 48 个用例通过。
+- 顺带修了一个真 bug：`parse_trading_plan` 在 JSON 有 actions 但**全部行非法**时
+  返回空 plan 而非 None，crew.py 据此跳过自由文本回退、静默丢单；已改为返回 None，
+  显式空 actions 列表仍表示"本轮无动作"。
+- 文档：README.md 重写为当前架构（本地 Ollama、自启链、15:35 计划任务、跑完自动
+  卸载、.env 键位、测试入口）；`.env.example` 同步为本地 Ollama 默认 + 云端备选注释。
