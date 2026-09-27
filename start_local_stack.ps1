@@ -1,5 +1,5 @@
 ﻿# stock-crewai 本地模型全栈自启守卫（开机由 stock-crewai-autostart.vbs 无窗口调用）
-# 顺序: 杀托盘(自动更新源) -> 锁 cuda_v12 后端 -> 校准 num_ctx -> 设 keep_alive -> 起 serve -> 预热(带自愈) -> 跑 crew 包装器(跑完自动卸模型)
+# 顺序: 杀托盘(自动更新源) -> 锁 cuda_v12 后端 -> 校准 num_ctx -> 设 keep_alive -> 起 serve -> 预热(带自愈) -> 注册交易日 15:35 定时运行(到点由计划任务跑, 跑完自动卸模型)
 $ErrorActionPreference = 'Continue'
 $Repo = "D:\aishare\repo\stock-crewai-master"
 $OllamaDir = Join-Path $env:LOCALAPPDATA "Programs\Ollama"
@@ -108,9 +108,6 @@ for ($round = 1; $round -le 2 -and -not $warmOk; $round++) {
     }
 }
 if (-not $warmOk) { Log 'FATAL: warmup failed after restart, skip crew run'; exit 1 }
-# 6) 拉起分析流水线(无窗口, 日志落盘)
-$stamp = Get-Date -Format "yyyyMMdd-HHmm"
-$crewLog = "crew_run-autostart-" + $stamp + ".log"
-Start-Process -FilePath $Python -ArgumentList "-u","run_crew_then_release.py" -WorkingDirectory $Repo -RedirectStandardOutput (Join-Path $Repo $crewLog) -RedirectStandardError (Join-Path $Repo ("crew_run-autostart-" + $stamp + ".err.log")) -WindowStyle Hidden
-Log ("crew.py launched -> " + $crewLog)
-Log "=== local stack autostart done ==="
+# 6) 注册/刷新定时运行任务(周一~周五 15:35 由计划任务跑, 不在登录时立即跑)
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo "ensure_run_schedule.ps1") 2>&1 | ForEach-Object { Log ("schedule: " + $_) }
+Log "=== local stack autostart done (server ready, run scheduled) ==="

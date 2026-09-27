@@ -11,6 +11,7 @@
 import os
 import subprocess
 import sys
+import time
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 PYTHON = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python312", "python.exe")
@@ -25,10 +26,47 @@ def release_model() -> None:
         print(f"[model-release] failed: {e}")
 
 
+def _other_crew_running() -> bool:
+    """True if another crew.py / wrapper process is already running."""
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name = 'python.exe'\" | "
+             "Where-Object { $_.CommandLine -like '*crew.py*' -or $_.CommandLine -like '*run_crew_then_release*' } | "
+             "Select-Object -ExpandProperty ProcessId"],
+            capture_output=True, text=True, timeout=30,
+        ).stdout.strip()
+    except Exception:
+        return False
+    pids = [int(x) for x in out.split() if x.strip().isdigit()]
+    others = [p for p in pids if p != os.getpid()]
+    if others:
+        print(f"[model-release] another crew run already active (pid {others}), exit")
+    return bool(others)
+
+
 def main() -> int:
-    print(f"[model-release] launching crew.py ...")
-    proc = subprocess.run([PYTHON, "-u", "crew.py"], cwd=REPO)
-    print(f"[model-release] crew.py exited rc={proc.returncode}, releasing model ...")
+    if _other_crew_running():
+        return 0
+    # 计划任务里 vbs 以隐藏窗口拉起, stdout 无处可去, 自己落盘
+    os.makedirs(os.path.join(REPO, "logs"), exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M")
+    log_path = os.path.join(REPO, "logs", f"scheduled-run-{stamp}.log")
+    logf = open(log_path, "a", encoding="utf-8", buffering=1)
+
+    def say(msg: str) -> None:
+        line = f"[model-release] {msg}"
+        try:
+            logf.write(line + "\n")
+        except OSError:
+            pass
+        print(line)
+
+    say(f"launching crew.py, log={log_path}")
+    with open(log_path, "a", encoding="utf-8", buffering=1) as out:
+        proc = subprocess.Popen([PYTHON, "-u", "crew.py"], cwd=REPO, stdout=out, stderr=subprocess.STDOUT)
+        proc.wait()
+    say(f"crew.py exited rc={proc.returncode}, releasing model ...")
     release_model()
     return proc.returncode
 
