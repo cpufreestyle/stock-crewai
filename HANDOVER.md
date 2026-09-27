@@ -740,3 +740,21 @@ m.Completions.create = lambda self, *a, **kw: (CAPTURED.append(kw), (_Stop(),))[
 - **坑 2：自愈重启会烫死在跑的流水线**。守卫原来“先预热失败再重启”的顺序，会在
   重复触发时把正在推理的 crew 打死（11:35 实测死亡一次）。已调整顺序：防重复检查
   前移到起服务之前，发现 crew/包装器在跑就只确认服务在线然后退出，不预热不重启。
+
+### 14.7 开机不再立即跑：改为“合适时间”定时运行（9/27 中午起）
+用户要求开机后由系统自己挑合适时间运行，不再登录即跑。新流程：
+- `start_local_stack.ps1`（开机 vbs 调用）：杀托盘→锁后端→校准 num_ctx→起 serve→预热校验→
+  调用 `ensure_run_schedule.ps1` 注册计划任务，**登录时不再直接跑分析**。
+- `ensure_run_schedule.ps1`：注册 `stock-crewai-daily-run`，每周一至周五 `AUTORUN_HHMM`
+  （默认 15:35，A股收盘后 5 分钟；可用环境变量改），StartWhenAvailable=true（睡眠/关机
+  错过则开机补跑），执行时限 2 小时。幂等，每次开机刷新。
+- `run_crew_scheduled.vbs`：计划任务的实际动作，隐藏窗口拉起
+  `run_crew_then_release.py`（vbs 不碰引号地狱）。
+- `run_crew_then_release.py` 增强：启动前检查是否有别的 crew/包装器在跑（防双流水线同时
+  下单）；crew 输出 tee 到 `logs/scheduled-run-<stamp>.log`（计划任务隐藏窗口，不落盘
+  就什么都看不到）；跑完 `ollama stop` 卸载。
+- 实测（12:23 手动触发任务）：wscript→包装器→crew 全链路跑通，12:37 完成并存档
+  `history/report_20260927_1237.md`，结构化解析 4 条动作（全 hold/校准止损，无新成交），
+  退出后自动卸载（显存回落到 882M）。下次真实触发：2026-09-28（周一）15:35。
+- 注意：通知走 openclaw 且设计上静默失败，本次 12:23 那轮没有新通知记录；
+  报告/交易数据是权威凭证，通知只是附属。
