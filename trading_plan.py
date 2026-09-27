@@ -149,10 +149,16 @@ def parse_trading_plan(text: str) -> Optional[TradingPlan]:
                 actions.append(TradeAction(**row))
             except Exception:
                 continue  # one bad row must not sink the whole plan
-        if actions or (isinstance(rows, list) and "actions" in data):
+        if actions:
             return TradingPlan(
                 market_view=str(data.get("market_view") or ""),
                 actions=actions,
+            )
+        if not rows and "actions" in data:
+            # 显式空 actions = 模型本轮决定不动，与“有行但全部解析失败”区分开
+            return TradingPlan(
+                market_view=str(data.get("market_view") or ""),
+                actions=[],
             )
     return None
 
