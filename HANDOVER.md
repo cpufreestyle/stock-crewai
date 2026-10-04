@@ -2787,3 +2787,78 @@ error 早退、前 8 截断、缺 `代码` 跳过、`technical_analysis` 非 dic
 - 这是 `agents/` 目录下第 4 个被拆分的 `run()`；至此 `researcher` / `trader` /
   `rebalancer` / `backtest_agent` 四个编排入口中已有三个完成同构拆分。
 
+
+
+## 47. 拆分 agents/backtest_agent.py run() 为逐只回测循环 + 编排两段
+
+### 47.1 变更 lineage
+
+- `agents/backtest_agent.py`：224 → 226 行（+2，为 docstring 与空行）
+- `BacktestAgent.run()`：89 行 → 48 行（只保留早退、排序、写状态、组装输出）
+- 新增 1 个方法级 helper（紧跟 `run()` 之后）：`_validate_picks`
+
+### 47.2 拆分原则
+
+- `run()` 只保留「取 picks → 空早退 → 逐只回测 → 排序 → 写两次状态 → 生成报告 →
+  组装输出」七步编排，`try/except` 边界保持在 `run()`。
+- helper 单一职责：
+  - `_validate_picks(stock_picks)`：前 5 只截断、跳过无 `code`、调
+    `multi_strategy_backtest`、error 跳过、算评分、原地写回 `pick["backtest_score"]` /
+    `pick["backtest_summary"]`，返回 `(backtest_results, validated_picks)` 二元组
+- 排序、写状态、报告生成留在 `run()`：这三步各只有一两行，且都作用于
+  `_validate_picks` 的产物，属于编排职责而非循环职责。
+- `pick["backtest_score"]` / `pick["backtest_summary"]` 仍为原地写回（旧版语义），
+  helper 不返回新 pick 对象，避免一次多余的语义漂移。
+
+### 47.3 等价性验证（19 场景）
+
+方法：`git show HEAD:agents/backtest_agent.py` 导出版本 A，当前工作区为版本 B，
+`spec_from_file_location` 双加载，模块级 stub `multi_strategy_backtest` 为按
+`code` 查表的假函数（可返回正常 / `{"error": ...}` / 抛异常），假 `state` 提供
+`get_stock_picks` / `set_backtest_results` / `set_stock_picks`，
+对比四项全等：`dataclasses.asdict(AgentOutput)` 全字段 JSON、`set_backtest_results`
+入参、`set_stock_picks` 入参、异常路径的 `(类型, 消息)`。
+
+| 场景 | 结果 |
+|---|---|
+| `stock_picks` 为空列表（早退） | PASS |
+| `stock_picks` 为 None（早退） | PASS |
+| 单只候选 | PASS |
+| 恰好 5 只候选 | PASS |
+| 8 只候选（超出前 5 截断） | PASS |
+| 候选缺 `code` 键（跳过） | PASS |
+| 候选 `code` 为空字符串（跳过） | PASS |
+| 单只回测返回 `{"error": ...}`（跳过） | PASS |
+| 全部回测都返回 error | PASS |
+| 回测返回空 dict（无 `strategies`，走低分分支） | PASS |
+| 回测抛异常（被 `run()` 的 except 捕获） | PASS |
+| 部分成功 / 部分 error 混合 | PASS |
+| 三只不同回测收益（排序正确性） | PASS |
+| `best_strategy` 不同取值 | PASS |
+| 负收益（`best_return` 为负） | PASS |
+| 零收益 | PASS |
+| pick 携带的额外字段被保留 | PASS |
+| 重复 `code`（两只同码） | PASS |
+| 合计 19/19 四项全等 | PASS |
+
+覆盖到的分支：`stock_picks` 空 / None / 非空早退、前 5 截断、`code` 缺失与空串跳过、
+回测 error 跳过、回测抛异常被外层捕获、`_calculate_backtest_score` 的「无 strategies」
+低分分支、`validated_picks` 排序方向、`pick` 原地写回的两个字段。
+
+### 47.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `python -m compileall -q agents/backtest_agent.py` | CE=0 |
+| `pytest tests/ -q` | 125 passed |
+
+### 47.5 说明
+
+- 语义零变化：`stock_picks[:5]` 截断、`pick.get("code", "")` / `pick.get("name", "")`
+  取值、`bt.get("strategies", {})` / `bt.get("best_strategy", "N/A")` /
+  `bt.get("best_return", "N/A")` 三个默认值、`backtest_summary` 的 f-string 文案、
+  `validated_picks.sort(key=lambda x: x.get("backtest_score", 0), reverse=True)` 排序键与方向、
+  `AgentOutput.data` 三项与 `events` 结构全部逐字保留。
+- 这是 `agents/` 目录下第 4 个被拆分的 `run()`；至此 `researcher` / `trader` /
+  `rebalancer` / `backtest_agent` 四个编排入口全部完成同构拆分。
+

@@ -45,49 +45,8 @@ class BacktestAgent(AgentBase):
         logger.info(f"[Backtest] validating {len(stock_picks)} stocks...")
 
         try:
-            backtest_results = []
-            validated_picks = []
-
-            for pick in stock_picks[:5]:  # 只回测前5只
-                code = pick.get("code", "")
-                name = pick.get("name", "")
-
-                if not code:
-                    continue
-
-                # 执行多策略回测
-                bt = multi_strategy_backtest(code)
-                
-                if "error" in bt:
-                    logger.warning(f"[Backtest] {code} backtest failed: {bt['error']}")
-                    continue
-
-                # 解析回测结果
-                strategies = bt.get("strategies", {})
-                best_strategy = bt.get("best_strategy", "N/A")
-                best_return = bt.get("best_return", "N/A")
-
-                # 计算综合评分（基于回测）
-                backtest_score = self._calculate_backtest_score(bt)
-
-                backtest_results.append({
-                    "code": code,
-                    "name": name,
-                    "backtest": bt,
-                    "backtest_score": backtest_score,
-                    "best_strategy": best_strategy,
-                    "best_return": best_return,
-                })
-
-                # 将回测评分加入 pick
-                pick["backtest_score"] = backtest_score
-                pick["backtest_summary"] = (
-                    f"最佳策略: {best_strategy} ({best_return}) | "
-                    f"回测评分: {backtest_score}/100"
-                )
-                validated_picks.append(pick)
-
-                logger.info(f"[Backtest] {code} {name}: score={backtest_score}, best={best_strategy}")
+            # 逐只回测并评分（原地把回测数据写回 pick）
+            backtest_results, validated_picks = self._validate_picks(stock_picks)
 
             # 按回测评分排序
             validated_picks.sort(key=lambda x: x.get("backtest_score", 0), reverse=True)
@@ -120,6 +79,55 @@ class BacktestAgent(AgentBase):
         except Exception as e:
             logger.error(f"[Backtest] error: {e}")
             return AgentOutput(success=False, error=str(e))
+
+    def _validate_picks(self, stock_picks: List[Dict]) -> tuple:
+        """对前 5 只候选股逐个跑多策略回测并评分，返回 (回测结果列表, 入选列表)。"""
+        backtest_results = []
+        validated_picks = []
+
+        for pick in stock_picks[:5]:  # 只回测前5只
+            code = pick.get("code", "")
+            name = pick.get("name", "")
+
+            if not code:
+                continue
+
+            # 执行多策略回测
+            bt = multi_strategy_backtest(code)
+
+            if "error" in bt:
+                logger.warning(f"[Backtest] {code} backtest failed: {bt['error']}")
+                continue
+
+            # 解析回测结果
+            strategies = bt.get("strategies", {})
+            best_strategy = bt.get("best_strategy", "N/A")
+            best_return = bt.get("best_return", "N/A")
+
+            # 计算综合评分（基于回测）
+            backtest_score = self._calculate_backtest_score(bt)
+
+            backtest_results.append({
+                "code": code,
+                "name": name,
+                "backtest": bt,
+                "backtest_score": backtest_score,
+                "best_strategy": best_strategy,
+                "best_return": best_return,
+            })
+
+            # 将回测评分加入 pick
+            pick["backtest_score"] = backtest_score
+            pick["backtest_summary"] = (
+                f"最佳策略: {best_strategy} ({best_return}) | "
+                f"回测评分: {backtest_score}/100"
+            )
+            validated_picks.append(pick)
+
+            logger.info(f"[Backtest] {code} {name}: score={backtest_score}, best={best_strategy}")
+
+        return backtest_results, validated_picks
+
 
     def _calculate_backtest_score(self, bt: Dict) -> float:
         """根据回测结果计算评分（0-100）"""
