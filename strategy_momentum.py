@@ -18,6 +18,11 @@ from typing import Dict, List
 
 import portfolio_tracker as pt
 
+try:
+    from data_fetcher import get_sina_realtime as _shared_realtime
+except Exception:
+    _shared_realtime = None
+
 # 行业分类
 SECTOR_MAP = {
     "银行": ["000001", "600016", "600036", "601166", "601398"],
@@ -40,63 +45,11 @@ for codes in SECTOR_MAP.values():
     ALL_CODES.extend(codes)
 
 
-def get_sina_realtime(codes=None):
-    """获取新浪实时行情"""
-    if codes is None:
-        codes = ALL_CODES
-
-    sina_codes = []
-    for c in codes:
-        prefix = "sh" if c.startswith(("6", "9")) else "sz"
-        sina_codes.append(prefix + c)
-
-    url = "https://hq.sinajs.cn/list=" + ",".join(sina_codes)
-
-    for attempt in range(3):
-        try:
-            r = requests.get(url, headers={"Referer": "https://finance.sina.com.cn"}, timeout=20)
-            break
-        except Exception as e:
-            if attempt < 2:
-                time.sleep(3)
-            else:
-                print(f"[行情] 获取失败: {e}")
-                return {}
-
-    result = {}
-    for line in r.text.strip().split("\n"):
-        if '"' not in line:
-            continue
-        eq_pos = line.find("=")
-        if eq_pos < 0:
-            continue
-        var_part = line[:eq_pos]
-        data_part = line[eq_pos + 1:].strip().strip('"')
-        fields = data_part.split(",")
-        if len(fields) < 32:
-            continue
-
-        m = re.search(r"hq_str_(sh|sz)(\d+)", var_part)
-        if not m:
-            continue
-        code = m.group(2)
-
-        try:
-            result[code] = {
-                "name": fields[0],
-                "open": float(fields[1]) if fields[1] else 0,
-                "last_close": float(fields[2]) if fields[2] else 0,
-                "current": float(fields[3]) if fields[3] else 0,
-                "high": float(fields[4]) if fields[4] else 0,
-                "low": float(fields[5]) if fields[5] else 0,
-                "volume": int(float(fields[8])) if fields[8] else 0,
-                "amount": float(fields[9]) if fields[9] else 0,
-                "change_pct": (float(fields[3]) / float(fields[2]) - 1) * 100 if float(fields[2]) > 0 else 0,
-            }
-        except:
-            continue
-
-    return result
+def _quote(codes=None):
+    """实时行情统一走 data_fetcher（共享缓存与重试逻辑）"""
+    if _shared_realtime is None:
+        return {}
+    return _shared_realtime(codes or ALL_CODES)
 
 
 def score_stock(code, data):
@@ -283,7 +236,7 @@ def generate_trade_plan(realtime_data=None, portfolio_positions=None, cash=10000
     返回：{"buy": [...], "sell": [...], "hold": [...], "sectors": [...]}
     """
     if realtime_data is None:
-        realtime_data = get_sina_realtime()
+        realtime_data = _quote()
 
     if portfolio_positions is None:
         portfolio = pt.load_portfolio()
@@ -384,7 +337,7 @@ if __name__ == "__main__":
 
     # 获取实时行情
     print("获取实时行情...")
-    realtime_data = get_sina_realtime()
+    realtime_data = _quote()
     print(f"获取到 {len(realtime_data)} 只股票\n")
 
     # 行业排名
