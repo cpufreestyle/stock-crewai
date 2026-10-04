@@ -395,6 +395,12 @@ def execute_buy(candidates, portfolio_positions, cash, total_capital, realtime_d
     total_position_value = sum(
         realtime_data.get(code, {}).get("current", pos["avg_cost"]) * pos["shares"]
         for code, pos in portfolio_positions.items()
+        # 注意：这里原来是 `if code in realtime_data or True`（恒真），
+        # 即没有实时行情的持仓也按 avg_cost 计入仓位占比。
+        # 收紧成 `if code in realtime_data` 会让这类持仓不计入，
+        # position_ratio 可能从 0.80 以上掉到 0，从而放行本会被拦住的买入。
+        # 这属于风险敞口变化，需用户拍板，故保留现值，
+        # 并在 tests/test_execute_orders.py 里钉住行为。
         if code in realtime_data or True
     )
     position_ratio = total_position_value / total_capital
