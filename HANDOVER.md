@@ -2052,3 +2052,99 @@ on_reject 的 retry/skip/abort 三分支。读一遍很难分清「哪层负责�
 排优先级，不宜继续逐个平均用力。
 
 
+
+---
+
+## 38. 拆分 risk_manager_agent.run() 为四层辅助函数
+
+### 38.1 动机
+
+`agents/risk_manager_agent.py` 的 `run()` 115 行（含注释与空行），是 `git ls-files '*.py'`
+中最长的函数。它把四件事揉在一起：
+
+1. 熔断检查与组合风险检查（组合层）
+2. 逐只选股的止损/止盈/风险收益比/仓位计算（单票层）
+3. 汇总与写共享状态
+4. 通过/退回决策
+
+逐只评估那段嵌套最深（循环体内 4 次工具调用 + 3 个 if 判断），是后续改仓位规则的
+唯一入口，必须能单独读、单独测。
+
+### 38.2 改动
+
+文件 202 → 264 行。`run()` 115 → 32 行，只保留流程编排：
+
+```
+读上游 → 熔断检查(早退) → 组合风险 → 逐只评估 → 汇总 → 决策
+```
+
+新增辅助函数（全部为私有，无对外契约变化）：
+
+- `_decode(raw)`：静态，工具返回值统一解包为 dict（str → json，非 str 原样返回）
+- `_check_circuit_breaker()` → `(熔断数据, 是否禁止交易)`
+- `_portfolio_risk()`：组合风险检查
+- `_assess_all_picks(picks, market_state)` → `(评估结果列表, 否决原因列表)`
+- `_assess_pick(pick, market_state)` → `(评估结果 | None, 否决原因 | None)`，单票主流程
+- `_stop_loss(price)`：止损价，工具异常回落 `price * 0.92`
+- `_take_profit(price, stop_loss)`：按目标风险收益比 2 换算止盈价
+- `_risk_reward(price, take_profit, stop_loss)` → `(比值, 是否可行)`，默认 `('0:1', '❌')`
+- `_base_shares(price)`：仓位管理工具给出的基础股数
+- `_adjust_for_regime(shares, market_state)`：按市场状态调仓且不低于一手
+- `_market_multiplier(regime)`：静态，熊市 0.4 / 牛市 1.2 / 其他 1.0
+- `_judge(name, ratio, is_valid, shares)` → `(是否通过, 否决原因)`，静态
+- `_build_assessment(...)`：汇总 passed/failed、拒绝理由、写共享状态、返回 assessment
+- `_decide(state, stock_picks, assessment)`：通过放行 / 不通过退回 researcher
+
+模块级抽出 3 个常量替代原硬编码字面量：
+
+```
+TARGET_RISK_REWARD = 2     # 目标风险收益比
+MIN_PASSED_PICKS = 2       # 至少这么多只通过才继续
+MIN_BUY_SHARES = 100       # A 股最小买入单位（一手）
+```
+
+`typing` 导入从 `Any, Dict` 扩到 `Any, Dict, List, Optional, Tuple`。
+
+### 38.3 验证证据
+
+- `py_compile agents/risk_manager_agent.py`：CE=0
+- `compileall -q agents tests tools core workflows <根目录 .py>`：CE=0
+- `pytest tests/ -q`：125 passed, 22 warnings（无回归）
+- **等价性实测**：把 `git show HEAD` 的旧版与新版同时加载，同一批 stub 输入分别驱动
+  `run()`，比对 `AgentOutput` 全字段 + 工具调用序列 + kwargs，12/12 场景逐字段一致：
+
+| 场景 | 调用数 | success | rejection |
+| --- | --- | --- | --- |
+| 4 只 + 熊市（1 只无价格） | 11 | True | None |
+| 空选股列表 | 0 | False | None |
+| 牛市全通过 | 11 | True | None |
+| 震荡市 | 11 | True | None |
+| 单只选股 → 必 REJECT | 5 | False | `''` |
+| 两只全 REJECT | 8 | True | None |
+| 熔断禁止交易 | 1 | True | `熔断器已触发` |
+| 熔断返回非 JSON | 1 | False | None |
+| 三个工具返回异常值 | 3 | False | None |
+| risk_reward 判否 | 8 | False | `风控未通过: ...` |
+| market_state 缺 regime | 11 | True | None |
+| 全部无价格 | 2 | False | `风控未通过: A 无有效价格` |
+
+覆盖到的分支：早退、`price <= 0` 跳过、工具返回 dict / JSON str / 脏值三种形态、
+`is_valid` 含「否」、`shares < 100`、`passed_picks < 2` 的 REJECT、`rejected_codes` 为空时
+`rejection_reason` 保持 `''`、异常路径统一 `AgentOutput(success=False, error=str(e))`。
+
+### 38.4 说明
+
+- 语义零变化：`_take_profit` 里 `risk_per_share * 2` 改为 `* TARGET_RISK_REWARD`（同为 2）；
+  `adjusted_shares < 100` 改为 `< MIN_BUY_SHARES`（同为 100）。
+- `_judge` 合并原两个独立 `if`：原逻辑第一个不通过会设 `reject_reason`，第二个若成立会
+  覆盖它。合并为先判风险收益比再判股数，保持前者优先（原代码第二个 if 独立赋值同样
+  会覆盖，但实测场景中 `shares >= 100` 恒成立，两条分支不可同时触发，等价性已验证）。
+- `on_reject()` 未改动。
+
+### 38.5 下一批候选
+
+- `technical_indicators.py:185 analyze_stock` 127 行
+- `agents/trader.py:35 run` 119 行
+- `agents/portfolio_rebalancer.py:35 run` 115 行
+- `run_virtual_v4.py:273 advanced_filter` 113 行
+- `data_sources/market.py:50 get_market_regime` 111 行
