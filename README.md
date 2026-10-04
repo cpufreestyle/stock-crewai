@@ -88,7 +88,8 @@ stock-crewai/
 ├── warmup_llm.py              # 模型预热
 ├── web_dashboard.py           # Web 看板
 ├── core/  workflows/  tools/  # 事件总线/编排/工具集
-└── tests/                     # pytest 测试套件（48 个用例）
+├── data_sources/             # 数据获取实现（下方门面再导出）
+└── tests/                     # pytest 测试套件（56 个用例）
 ```
 
 ## ⚙️ 配置说明
@@ -102,12 +103,18 @@ LLM 相关环境变量见上文 `.env`；改模型只动 `MODEL_NAME` 与 `OPENA
 ## 🧪 测试
 
 ```bash
-pytest tests/ -q        # 48 个用例：config/api_cache/交易计划/LLM 缓存等
+pytest tests/ -q        # 56 个用例：config/api_cache/交易计划/LLM 缓存/熔断开关等
 ```
 
 CI（`.github/workflows/ci.yml`）在 push/PR 时自动运行同一套测试。
 
 ## 📝 更新日志
+
+### v4.4.0 (2026-10-04) - 代码精简与模块化
+- `data_fetcher.py`（716 行）拆分为 `data_sources/` 包，`data_fetcher.py` 变为再导出门面，调用方不变
+- 回撤/夏普计算合并到 `quant_metrics.py`，顺带修掉 peak=0 时的 `ZeroDivisionError`
+- 删除全仓零调用点的死代码与未使用导入（见 HANDOVER 第十八节）
+- 补齐 `circuit_breaker.py` 缺失的 `CIRCUIT_BREAKER_*` 配置项（该模块此前无法 import）
 
 ### v4.3.0 (2026-09-27) - 本地 Ollama 化 + 可维护性整改
 - 切换本地推理：Ollama + qwen3.8-gsq-rco-iq3s，`reasoning_effort=none`
