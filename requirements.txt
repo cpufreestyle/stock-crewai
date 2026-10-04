@@ -1,20 +1,45 @@
+# ── LLM / Agent 编排 ────────────────────────────────────────
 crewai>=1.0.0
 crewai-tools>=1.0.0
+
+# ── 数据获取（data_sources/）────────────────────────────────
 akshare>=1.10.0
 pandas>=2.0.0
+requests>=2.31.0
+# numpy：agents/performance_auditor.py 用作数组运算
+numpy>=1.24.0
+
+# ── 结构化输出 / 工具参数校验（trading_plan.py, tools/*）───
+pydantic>=2.0.0
+
+# ── 配置与重试 ─────────────────────────────────────────────
 python-dotenv>=1.2.2
-langchain-openai>=0.1.0
+tenacity>=8.2.0
+# filelock：safe_io.py 的并发安全 JSON 读写
+filelock>=3.12.0
 
-# 定时调度（Dashboard 内置 Scheduler）
-apscheduler>=3.10.0
-
-# Web Dashboard
+# ── Web Dashboard ──────────────────────────────────────────
 flask>=3.1.3
 flask-cors>=6.0.5
 flask-compress>=1.15
 # 生产 WSGI 服务器（替代 Flask 开发服务器）
 waitress>=3.0.0
+# 定时调度（Dashboard 内置 Scheduler）
+apscheduler>=3.10.0
 
-# 实盘接口（可选，云部署默认不安装，避免 Linux 构建失败）
+# ── LLM 后端 SDK ───────────────────────────────────────────
+# 本地 Ollama 路线走 OpenAI 兼容端点，仍需 openai SDK
+openai>=1.0.0
+
+# ── 可选（默认注释，按需开启）──────────────────────────────
+# 实盘接口：云部署默认不安装，避免 Linux 构建失败
 # efinance>=0.5.0
 # easytrader>=0.23.7
+
+# ── 开发 / 测试（CI 也会单独安装）──────────────────────────
+pytest>=7.4.0
+pytest-cov>=4.1.0
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.1.0
+
