@@ -1384,3 +1384,61 @@ performance_metrics 的等价性在上两轮已用 6 组序列逐字段验证过
 全仓 json.dump 直写从 15 处降到 14 处，剩下的都判断过：
 带时间戳的唯一文件名（撕裂无害）或有单实例保护。
 
+
+
+## 二十五、下单执行端补测，并标记一处恒真条件（2026-10-05）
+
+上上轮说 run_virtual_v4.py 剩下 648 行里 execute_buy / execute_sell 还没有安全网，
+这一节补上。
+
+### 25.1 execute_buy / execute_sell 测试（1123f2a）
+
+11 个用例，全部 monkeypatch 掉 pt 与 NOTIFIER_AVAILABLE，在内存里跑，
+不碰真实 portfolio.json：
+
+买入侧：
+
+- 资金足够时成交，且止损止盈按固定比例算对（10 元 -> 9.2 / 12.0）；
+- 资金不足跳过；
+- 持仓数已达 MAX_POSITIONS 不再买；
+- 价格为 0 跳过；
+- update_position 返回 error 时不计入 buys；
+- 仓位占比超限停买 / 卡在限值上仍放行（边界）。
+
+卖出侧：
+
+- STOP_LOSS / TAKE_PROFIT 会卖，WARNING 不会；
+- 未持仓的 code 跳过；
+- 价格为 0 跳过；
+- pnl 计算正确（(10-11)*300 = -300）。
+
+### 25.2 发现一处恒真条件，但**故意没改**（2f9448b）
+
+execute_buy 算仓位占比时写的是：
+
+    if code in realtime_data or True
+
+这个条件恒为真。原意应该是 `if code in realtime_data`（只按有实时行情的持仓算），
+但写成恒真后，**没有行情的持仓也会按 avg_cost 计入占比**。
+
+实测影响（10 万资本、8000 股 @ 成本 10 元）：
+
+- 恒真版本：占比 80,000 / 100,000 = 0.80
+- 收紧版本：占比 0
+
+也就是说当前实现更容易把 position_ratio 推过 MAX_POSITION_RATIO(0.80)，
+从而拦掉本可以进行的买入；用的是陈旧成本价而非现价。
+
+这是风险敞口变化，按本项目惯例不擅自改，只做两件事：
+
+- 在代码处写清这段历史与收紧后会怎样；
+- 用 test_holdings_without_live_quote_still_count 把现状钉住，
+  以后谁想改立刻看得见改了什么。
+
+要不要收紧，需要你拍板。
+
+### 25.3 数字
+
+测试数 114 -> 125。run_virtual_v4.py 的下单执行端（execute_buy / execute_sell）
+从零覆盖变成 11 个用例守着，加上此前的撤价 18 个，这条路径已有基本安全网。
+
