@@ -2537,3 +2537,86 @@ RSI/MACD/BOLL 三项增强各自的真假值、熊市/牛市门槛、现金约�
   等价性驱动是不可省略的一步。
 - `_regime_signals` 入参带 `closes` 而非四个 Series，因为 MA 比较读的是同一批 Series；
   用 dict 承载可避免 7 个位置参数。
+
+
+## 44. 拆分 backtest.multi_strategy_backtest 为取数/跑策略/组装报告三层
+
+### 44.1 变更 lineage
+
+- `backtest.py`：441 → 464 行（+23，全部为 docstring、空行与分节注释）
+- `multi_strategy_backtest()`：102 行 → 46 行（只保留 try/except 与三层编排）
+- 新增 4 个模块级 helper（紧接 `_compute_rsi` 之后）：`_fmt_metrics` / `_load_backtest_prices` / `_run_all_strategies` / `_assemble_strategy_report`
+
+### 44.2 拆分原则
+
+- `multi_strategy_backtest()` 只保留「取数 → 空数据早退 → 跑三套策略 → 组装报告」加 `try/except` 边界。
+- helper 单一职责：
+  - `_fmt_metrics(values, trades)`：由权益曲线与成交记录算 `(回撤%, 胜率%)`，无平仓交易时胜率显示占位文案
+  - `_load_backtest_prices(code, days)`：算起止日期、拉数据、`price_data.empty` 判定为空则返回 `None`
+  - `_run_all_strategies(price_data)`：跑买入持有 / 均线 / RSI 三套，回 `{buy_hold_return, bh_values, ma, rsi}`
+  - `_assemble_strategy_report(price_data, runs)`：组装 `strategies` / `best_strategy` / `best_return`
+- 原函数内的嵌套 `def _metric(...)` 提为模块级 `_fmt_metrics`，签名与返回 `tuple` 不变。
+- 原函数内的局部 `from datetime import datetime, timedelta` 与 `import data_fetcher as df` 移除：
+  `datetime` / `timedelta` 与 `df` 在模块头部已有同名导入，语义等价（见 44.5）。
+- `try/except Exception` 边界保持在 `multi_strategy_backtest()`，helper 不重复捕获，
+  `{"error": str(e)}` 与 `{"error": "无历史数据"}` 两个返回值逐字保留。
+
+### 44.3 等价性验证（30 场景）
+
+方法：`git show HEAD:backtest.py` 导出版本 A，当前工作区为版本 B，
+`importlib.util.spec_from_file_location` 双加载，fake `data_fetcher`（`get_stock_price`
+返回桩 DataFrame）+ fake `datetime.now` 固定为 2024-01-02 12:00:00，对比
+`multi_strategy_backtest` 返回值的 JSON 全等（`sort_keys=True`）。
+
+| 场景 | 结果 |
+|---|---|
+| 空 DataFrame（`{'收盘': []}`） | PASS |
+| 零行序列 | PASS |
+| 单点 | PASS |
+| 两点 | PASS |
+| 30 点水平线 | PASS |
+| 90 点单边上涨 | PASS |
+| 90 点单边下跌 | PASS |
+| V 型反转（跌 60 + 涨 30） | PASS |
+| 90 点锯齿 | PASS |
+| 120 点正弦 | PASS |
+| 先涨后跌（45 + 45） | PASS |
+| 90 点频繁均线交叉（`100 + i%10`） | PASS |
+| RSI 买入区（`200 - i`） | PASS |
+| RSI 卖出区（`100 + i`） | PASS |
+| 含零点（每 7 点为 0） | PASS |
+| 全负值序列 | PASS |
+| 含 NaN（每 3 点） | PASS |
+| 巨值（1e9） | PASS |
+| 微值（0.001 起） | PASS |
+| 长度恰好 20 / 21 / 14 / 15 / 5 | PASS |
+| `days=1` / `days=200` / `days=0` | PASS |
+| 全等非 100 常量（55） | PASS |
+| 非整数步长上涨（0.5） | PASS |
+| 异常路径（`get_stock_price` 抛 `RuntimeError`） | PASS |
+| 合计 30/30 | PASS |
+
+覆盖到的分支：`price_data.empty` 早退、三套策略全路径、`position_end` 为 1 与 0 两种
+`当前持仓`、有/无平仓交易两种胜率文案、`best_strategy` 三种取值、除零告警、异常早退。
+
+### 44.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `python -m compileall -q backtest.py` | CE=0 |
+| `pytest tests/ -q` | 125 passed |
+
+### 44.5 说明
+
+- 语义零变化：三套策略的阈值（MA5 / MA20、RSI 30 / 70）、`收益率` / `最大回撤` / `胜率`
+  的 `:.2f` / `:.1f` 格式化、`当前持仓` 文案与 `best_strategy` 的 `max(...)` 取值规则全部逐字保留。
+- 移除函数内局部 import 的依据：模块头部已有 `from datetime import datetime, timedelta` 与
+  `import data_fetcher as df`，两处名字绑定的是同一对象；局部 import 属于冗余重复。
+  等价性实测中特意用 `sys.modules['data_fetcher']` 注入桩，新旧两版都从模块级取 `df`，
+  因此这一差异被 30 场景完整覆盖而非绕过。
+- 等价性首跑曾出现 0/30 全 FAIL，原因是第一版脚本只对版本 B 打桩 `m.df`，版本 A 的
+  函数内局部 import 覆盖了桩、走了真实网络。改为同时注入 `sys.modules['data_fetcher']`
+  后 30/30 通过 —— 与 43.5 的记录一致：桩没打全时，FAIL 的是测试而非代码。
+- `price_data` 仍作为 `_assemble_strategy_report` 的入参（虽然内部只用 `runs`），
+  是为保持与旧版一致的调用形态，后续若再拆分可去掉。
+

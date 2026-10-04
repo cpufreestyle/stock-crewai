@@ -339,6 +339,95 @@ def _compute_rsi(price_data):
     return 100 - (100 / (1 + rs))
 
 
+def _fmt_metrics(values: list, trades: list) -> tuple:
+    """由权益曲线与成交记录算 (最大回撤, 胜率) 字符串；无平仓交易时胜率显示占位。"""
+    dd = calculate_max_drawdown(values)
+    wr = (sum(1 for w in trades if w) / len(trades) * 100) if trades else None
+    return (f"{dd:.2f}%", f"{wr:.1f}%" if wr is not None else "无平仓交易")
+
+
+def _load_backtest_prices(code: str, days: int):
+    """拉取个股历史收盘数据；空数据返回 None。"""
+    end_date = datetime.now().strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    price_data = df.get_stock_price(code, start_date=start_date, end_date=end_date)
+    if price_data.empty:
+        return None
+
+    return price_data
+
+
+def _run_all_strategies(price_data) -> dict:
+    """跑买入持有/均线/RSI 三套策略，返回各自的收益与派生指标。"""
+    closes = price_data["收盘"]
+
+    # 买入持有：以首末收盘价算收益，权益曲线即收盘价序列
+    initial_price = closes.iloc[0]
+    final_price = closes.iloc[-1]
+    buy_hold_return = (final_price - initial_price) / initial_price * 100
+
+    # 策略1: 均线策略（MA5 > MA20 买入，反之卖出）
+    ma5 = closes.rolling(5).mean()
+    ma20 = closes.rolling(20).mean()
+    ma = _ma_strategy(price_data, ma5, ma20)
+
+    # 策略2: RSI策略
+    rsi = _compute_rsi(price_data)
+    rsi_res = _rsi_strategy(price_data, rsi)
+
+    return {
+        "buy_hold_return": buy_hold_return,
+        "bh_values": closes.tolist(),
+        "ma": ma,
+        "rsi": rsi_res,
+    }
+
+
+def _assemble_strategy_report(price_data, runs: dict) -> dict:
+    """把三套策略的原始结果组装为对外返回结构，并挑出最佳策略。"""
+    bh_dd, _ = _fmt_metrics(runs["bh_values"], [])
+    ma_dd, ma_wr = _fmt_metrics(runs["ma"]["values"], runs["ma"]["trades"])
+    rsi_dd, rsi_wr = _fmt_metrics(runs["rsi"]["values"], runs["rsi"]["trades"])
+
+    strategies = {
+        "买入持有": {
+            "收益率": f"{runs['buy_hold_return']:.2f}%",
+            "最大回撤": bh_dd,
+            "胜率": "不适用",
+            "当前持仓": "是"
+        },
+        "均线策略": {
+            "收益率": f"{runs['ma']['total_return']:.2f}%",
+            "最大回撤": ma_dd,
+            "胜率": ma_wr,
+            "当前持仓": "是" if runs["ma"]["position_end"] == 1 else "否"
+        },
+        "RSI策略": {
+            "收益率": f"{runs['rsi']['total_return']:.2f}%",
+            "最大回撤": rsi_dd,
+            "胜率": rsi_wr,
+            "当前持仓": "是" if runs["rsi"]["position_end"] == 1 else "否"
+        },
+    }
+
+    # 找出最佳策略
+    returns = {
+        "买入持有": runs["buy_hold_return"],
+        "均线策略": runs["ma"]["total_return"],
+        "RSI策略": runs["rsi"]["total_return"],
+    }
+
+    best_strategy = max(returns, key=returns.get)
+    best_return = f"{returns[best_strategy]:.2f}%"
+
+    return {
+        "strategies": strategies,
+        "best_strategy": best_strategy,
+        "best_return": best_return
+    }
+
+
 def multi_strategy_backtest(code: str, days: int = 90) -> dict:
     """
     对单只股票运行多策略回测
@@ -355,7 +444,7 @@ def multi_strategy_backtest(code: str, days: int = 90) -> dict:
                 "最大回撤": str,
                 "胜率": str,
                 "当前持仓": str
-            }
+            "
         },
         "best_strategy": str,
         "best_return": str,
@@ -363,82 +452,15 @@ def multi_strategy_backtest(code: str, days: int = 90) -> dict:
     }
     """
     try:
-        from datetime import datetime, timedelta
-        import data_fetcher as df
-        
         # 获取历史数据
-        end_date = datetime.now().strftime("%Y-%m-%d")
-        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        
-        price_data = df.get_stock_price(code, start_date=start_date, end_date=end_date)
-        
-        if price_data.empty:
+        price_data = _load_backtest_prices(code, days)
+        if price_data is None:
             return {"error": "无历史数据"}
-        
-        # 策略1: 均线策略（MA5 > MA20 买入，反之卖出）
-        ma5 = price_data["收盘"].rolling(5).mean()
-        ma20 = price_data["收盘"].rolling(20).mean()
-        
-        # 计算收益率
-        initial_price = price_data["收盘"].iloc[0]
-        final_price = price_data["收盘"].iloc[-1]
-        buy_hold_return = (final_price - initial_price) / initial_price * 100
-        bh_values = price_data["收盘"].tolist()
 
-        # 均线策略收益（简化计算）
-        ma = _ma_strategy(price_data, ma5, ma20)
+        # 跑三套策略并组装报告
+        runs = _run_all_strategies(price_data)
+        return _assemble_strategy_report(price_data, runs)
 
-        # 策略2: RSI策略
-        rsi = _compute_rsi(price_data)
-        rsi_res = _rsi_strategy(price_data, rsi)
-
-        # 构建结果：回撤/胜率由各自权益曲线与成交记录算出
-        def _metric(values, trades):
-            dd = calculate_max_drawdown(values)
-            wr = (sum(1 for w in trades if w) / len(trades) * 100) if trades else None
-            return (f"{dd:.2f}%", f"{wr:.1f}%" if wr is not None else "无平仓交易")
-
-        bh_dd, _ = _metric(bh_values, [])
-        ma_dd, ma_wr = _metric(ma["values"], ma["trades"])
-        rsi_dd, rsi_wr = _metric(rsi_res["values"], rsi_res["trades"])
-
-        strategies = {
-            "买入持有": {
-                "收益率": f"{buy_hold_return:.2f}%",
-                "最大回撤": bh_dd,
-                "胜率": "不适用",
-                "当前持仓": "是"
-            },
-            "均线策略": {
-                "收益率": f"{ma['total_return']:.2f}%",
-                "最大回撤": ma_dd,
-                "胜率": ma_wr,
-                "当前持仓": "是" if ma["position_end"] == 1 else "否"
-            },
-            "RSI策略": {
-                "收益率": f"{rsi_res['total_return']:.2f}%",
-                "最大回撤": rsi_dd,
-                "胜率": rsi_wr,
-                "当前持仓": "是" if rsi_res["position_end"] == 1 else "否"
-            },
-        }
-        
-        # 找出最佳策略
-        returns = {
-            "买入持有": buy_hold_return,
-            "均线策略": ma["total_return"],
-            "RSI策略": rsi_res["total_return"],
-        }
-        
-        best_strategy = max(returns, key=returns.get)
-        best_return = f"{returns[best_strategy]:.2f}%"
-        
-        return {
-            "strategies": strategies,
-            "best_strategy": best_strategy,
-            "best_return": best_return
-        }
-        
     except Exception as e:
         return {"error": str(e)}
 
