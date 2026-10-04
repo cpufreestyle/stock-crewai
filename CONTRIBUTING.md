@@ -105,7 +105,7 @@ git checkout -b feature/your-feature-name
 pytest tests/
 
 # 运行特定测试
-pytest tests/test_indicators.py -v
+pytest tests/test_stock_crewai.py -v
 ```
 
 ### 4. 提交代码
@@ -226,7 +226,7 @@ git commit -m "docs(readme): 更新安装说明"
 pytest
 
 # 运行特定测试
-pytest tests/test_indicators.py -v
+pytest tests/test_trading_plan_and_cache.py -v
 
 # 查看详细输出
 pytest -vv
@@ -238,14 +238,16 @@ pytest --cov=. --cov-report=html
 ### 编写测试
 
 ```python
-# tests/test_indicators.py
+# tests/test_my_module.py
 import pytest
 from technical_indicators import calculate_rsi, calculate_macd
 
-def test_rsi_normal():
-    """测试 RSI 正常计算"""
-    prices = [100, 102, 101, 103, 105, 104, 106]
+def test_rsi_range():
+    """RSI 应落在 0-100；数据不足时返回 None，需先断言有值"""
+    # 注意：calculate_rsi 默认 period=14，样本少于该值会返回 None
+    prices = [100 + (i % 5) * 0.5 for i in range(30)]
     rsi = calculate_rsi(prices)
+    assert rsi is not None
     assert 0 <= rsi <= 100
 
 def test_macd_signal():
