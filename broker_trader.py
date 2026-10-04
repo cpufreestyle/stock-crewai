@@ -123,8 +123,17 @@ class MockTrader:
             "pnl": round(pnl, 2)
         })
 
-        with open(self.trade_log_file, "w", encoding="utf-8") as f:
-            json.dump(trades, f, ensure_ascii=False, indent=2)
+        # 与 portfolio.json / trades_YYYYMM.json 一致的原子写：先写临时文件再 replace，
+        # 避免并发把交易日志写成“合法数组 + 残片”（9/26 run4 的撕裂写事故同因）。
+        tmp = self.trade_log_file + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(trades, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.trade_log_file)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
 
 
 class EFinanceTrader:
