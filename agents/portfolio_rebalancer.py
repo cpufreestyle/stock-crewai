@@ -35,91 +35,30 @@ class PortfolioRebalancerAgent(AgentBase):
     def run(self, task: Dict, state: Any) -> AgentOutput:
         """执行动态调仓分析"""
         market_state = state.get_market_state()
-        trade_plan = state.get_trade_plan()  # 从 Trader 获取交易计划
+        state.get_trade_plan()  # 从 Trader 获取交易计划
 
         logger.info(f"[Rebalancer] analyzing portfolio for rebalancing...")
 
         try:
             # 1. 查看当前持仓
-            vp_result = self.call_tool("view_portfolio")
-            portfolio = json.loads(vp_result) if isinstance(vp_result, str) else vp_result
-
-            if not portfolio or not portfolio.get("holdings"):
+            holdings = self._load_holdings()
+            if not holdings:
                 return AgentOutput(
                     success=True,
                     data={"action": "NO_ACTION", "reason": "无持仓，无需调仓"},
                     events=[{"type": "agent_complete", "source": self.name, "data": {"action": "none"}}],
                 )
 
-            holdings = portfolio.get("holdings", [])
-
             # 2. 分析每只持仓
-            rebalance_actions = []
-            
-            for h in holdings:
-                code = h.get("代码", h.get("code", ""))
-                name = h.get("名称", h.get("name", ""))
-                cost = float(h.get("成本价", h.get("cost", 0)))
-                current = float(h.get("当前价", h.get("current_price", 0)))
-                shares = int(h.get("持仓数量", h.get("shares", 0)))
-                profit_pct = (current - cost) / cost * 100 if cost > 0 else 0
+            rebalance_actions = self._analyze_holdings(holdings, market_state)
 
-                # 决策逻辑
-                action = self._decide_rebalance_action(h, market_state, profit_pct)
-
-                if action["action"] != "HOLD":
-                    rebalance_actions.append({
-                        "code": code,
-                        "name": name,
-                        "current_profit_pct": profit_pct,
-                        "action": action["action"],
-                        "reason": action["reason"],
-                        "suggested_shares": action.get("shares", 0),
-                    })
-
-            # 3. 生成调仓计划
+            # 3. 生成调仓计划并执行
             if not rebalance_actions:
                 report = "动态调仓分析：当前持仓无需调整"
                 actions_taken = []
             else:
                 report = self._generate_rebalance_report(rebalance_actions)
-                
-                # 执行调仓（谨慎执行，只执行明确的止损/止盈）
-                actions_taken = []
-                for action in rebalance_actions:
-                    if action["action"] == "SELL_STOP_LOSS" and action["current_profit_pct"] < -8:
-                        # 执行止损
-                        sell_result = self.call_tool(
-                            "execute_sell",
-                            code=action["code"],
-                            name=action["name"],
-                            price=0,  # 市价
-                            shares=action["suggested_shares"] or holdings[0].get("持仓数量", 0),
-                            reason=action["reason"],
-                        )
-                        sell_data = json.loads(sell_result) if isinstance(sell_result, str) else sell_result
-                        if isinstance(sell_data, dict) and sell_data.get("success"):
-                            actions_taken.append({"action": "STOP_LOSS", "code": action["code"]})
-                            msg = f"🔴 止损卖出 {action['name']}({action['code']}) 亏损{action['current_profit_pct']:.1f}%"
-                            self.call_tool("wechat_notify", message=msg)
-                            
-                    elif action["action"] == "TAKE_PROFIT" and action["current_profit_pct"] > 20:
-                        # 部分止盈（卖出一半）
-                        sell_shares = int(action["suggested_shares"] or holdings[0].get("持仓数量", 0) / 2)
-                        if sell_shares > 0:
-                            sell_result = self.call_tool(
-                                "execute_sell",
-                                code=action["code"],
-                                name=action["name"],
-                                price=0,
-                                shares=sell_shares,
-                                reason="分批止盈",
-                            )
-                            sell_data = json.loads(sell_result) if isinstance(sell_result, str) else sell_result
-                            if isinstance(sell_data, dict) and sell_data.get("success"):
-                                actions_taken.append({"action": "TAKE_PROFIT", "code": action["code"], "shares": sell_shares})
-                                msg = f"🟢 分批止盈 {action['name']}({action['code']}) 卖出{sell_shares}股 盈利{action['current_profit_pct']:.1f}%"
-                                self.call_tool("wechat_notify", message=msg)
+                actions_taken = self._execute_rebalance_actions(rebalance_actions, holdings)
 
             # 写入共享状态
             state.set_rebalance_plan({
@@ -147,6 +86,105 @@ class PortfolioRebalancerAgent(AgentBase):
         except Exception as e:
             logger.error(f"[Rebalancer] error: {e}")
             return AgentOutput(success=False, error=str(e))
+
+    # ── 持仓读取 ──────────────────────────────────────────────
+
+    def _load_holdings(self) -> List[Dict]:
+        """读取并解析当前持仓；无持仓 / 空持仓时返回空列表"""
+        vp_result = self.call_tool("view_portfolio")
+        portfolio = json.loads(vp_result) if isinstance(vp_result, str) else vp_result
+
+        if not portfolio or not portfolio.get("holdings"):
+            return []
+
+        return portfolio.get("holdings", [])
+
+    # ── 逐只分析 ──────────────────────────────────────────────
+
+    def _analyze_holdings(self, holdings: List[Dict], market_state: Dict) -> List[Dict]:
+        """逐只持仓做调仓决策，只保留非 HOLD 的建议项"""
+        rebalance_actions = []
+
+        for h in holdings:
+            code = h.get("代码", h.get("code", ""))
+            name = h.get("名称", h.get("name", ""))
+            cost = float(h.get("成本价", h.get("cost", 0)))
+            current = float(h.get("当前价", h.get("current_price", 0)))
+            shares = int(h.get("持仓数量", h.get("shares", 0)))
+            profit_pct = (current - cost) / cost * 100 if cost > 0 else 0
+
+            # 决策逻辑
+            action = self._decide_rebalance_action(h, market_state, profit_pct)
+
+            if action["action"] != "HOLD":
+                rebalance_actions.append({
+                    "code": code,
+                    "name": name,
+                    "current_profit_pct": profit_pct,
+                    "action": action["action"],
+                    "reason": action["reason"],
+                    "suggested_shares": action.get("shares", 0),
+                })
+
+        return rebalance_actions
+
+    # ── 调仓执行 ──────────────────────────────────────────────
+
+    def _execute_rebalance_actions(self, rebalance_actions: List[Dict],
+                                   holdings: List[Dict]) -> List[Dict]:
+        """谨慎执行：只跑明确的止损 / 止盈，返回已执行动作列表"""
+        actions_taken = []
+
+        for action in rebalance_actions:
+            taken = None
+            if action["action"] == "SELL_STOP_LOSS" and action["current_profit_pct"] < -8:
+                taken = self._stop_loss(action, holdings)
+            elif action["action"] == "TAKE_PROFIT" and action["current_profit_pct"] > 20:
+                taken = self._take_profit(action, holdings)
+            if taken:
+                actions_taken.append(taken)
+
+        return actions_taken
+
+    def _stop_loss(self, action: Dict, holdings: List[Dict]) -> Dict:
+        """执行止损：全额卖出并推送微信通知"""
+        sell_result = self.call_tool(
+            "execute_sell",
+            code=action["code"],
+            name=action["name"],
+            price=0,  # 市价
+            shares=action["suggested_shares"] or holdings[0].get("持仓数量", 0),
+            reason=action["reason"],
+        )
+        sell_data = json.loads(sell_result) if isinstance(sell_result, str) else sell_result
+        if not (isinstance(sell_data, dict) and sell_data.get("success")):
+            return None
+
+        msg = f"🔴 止损卖出 {action['name']}({action['code']}) 亏损{action['current_profit_pct']:.1f}%"
+        self.call_tool("wechat_notify", message=msg)
+        return {"action": "STOP_LOSS", "code": action["code"]}
+
+    def _take_profit(self, action: Dict, holdings: List[Dict]) -> Dict:
+        """执行止盈：卖出一半并推送微信通知"""
+        sell_shares = int(action["suggested_shares"] or holdings[0].get("持仓数量", 0) / 2)
+        if sell_shares <= 0:
+            return None
+
+        sell_result = self.call_tool(
+            "execute_sell",
+            code=action["code"],
+            name=action["name"],
+            price=0,
+            shares=sell_shares,
+            reason="分批止盈",
+        )
+        sell_data = json.loads(sell_result) if isinstance(sell_result, str) else sell_result
+        if not (isinstance(sell_data, dict) and sell_data.get("success")):
+            return None
+
+        msg = f"🟢 分批止盈 {action['name']}({action['code']}) 卖出{sell_shares}股 盈利{action['current_profit_pct']:.1f}%"
+        self.call_tool("wechat_notify", message=msg)
+        return {"action": "TAKE_PROFIT", "code": action["code"], "shares": sell_shares}
 
     def _decide_rebalance_action(self, holding: Dict, market: Dict, profit_pct: float) -> Dict:
         """决策是否需要调仓"""

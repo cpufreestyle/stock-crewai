@@ -2296,3 +2296,78 @@ signal = _judge_signal(score)
   不影响调用方（只经 `run()` 内部调用）。
 - 与 38 节 `risk_manager_agent` 同一模式：早退分支 → 输出型 helper，主流程 → 编排。
 
+
+## 41. 拆分 agents/portfolio_rebalancer.py run() 为读取/分析/执行三层
+
+### 41.1 变更 lineage
+
+- `agents/portfolio_rebalancer.py`：196 → 234 行（+38，全部为 docstring、空行与分节注释）
+- `PortfolioRebalancerAgent.run()`：115 行 → 45 行（只保留编排骨架）
+- 新增 5 个 helper：`_load_holdings` / `_analyze_holdings` / `_execute_rebalance_actions` / `_stop_loss` / `_take_profit`
+
+### 41.2 拆分原则
+
+- `run()` 只保留「读持仓 → 逐只分析 → 生成报告 → 执行 → 写状态 → 组装输出」六步编排。
+- helper 单一职责：
+  - `_load_holdings()`：调 `view_portfolio`、解析 JSON、空持仓早退判定的统一出口
+  - `_analyze_holdings(holdings, market_state)`：逐只算盈亏并决策，只回非 HOLD 项
+  - `_execute_rebalance_actions(rebalance_actions, holdings)`：按动作类型分派，收集已执行项
+  - `_stop_loss(action, holdings)` / `_take_profit(action, holdings)`：单类型卖出的下单、判成功、记账、通知
+- 原 `else` 分支里的「先 `actions_taken = []` 再 for 循环」改为由 `_execute_rebalance_actions`
+  自己建列表并返回，`run()` 里的变量赋值语义不变。
+- `try/except` 边界保持在 `run()`，helper 不重复捕获。
+
+### 41.3 等价性验证（25 场景）
+
+方法：`git show HEAD:agents/portfolio_rebalancer.py` 导出版本 A，当前工作区为版本 B，
+`importlib.util.spec_from_file_location` 双加载，stub `state` + fake `call_tool`
+（签名 `def fake(tool_name, **kw)`），对比三项全等：`dataclasses.asdict(AgentOutput)`
+全字段 JSON、工具调用序列（工具名 + kwargs）、`set_rebalance_plan` 入参。
+
+| 场景 | 结果 |
+|---|---|
+| 空 portfolio dict | PASS |
+| 无 `holdings` 键 | PASS |
+| `holdings` 空列表 | PASS |
+| dict 直接返回（非字符串） | PASS |
+| 持仓为 JSON 字符串 | PASS |
+| 止损 -20%（触发 `SELL_STOP_LOSS` 且 `< -8`） | PASS |
+| 止损恰好 -8%（两个条件不满足，不应执行） | PASS |
+| 止盈 35%（触发 `TAKE_PROFIT` 且 `> 20`） | PASS |
+| 止盈 25% | PASS |
+| 止盈 50% | PASS |
+| 熊市减仓（`REDUCE`，不执行卖出） | PASS |
+| 熊市减仓 8% | PASS |
+| 牛市持有（`HOLD`） | PASS |
+| 牛市亏损 → 走止损 | PASS |
+| `suggested_shares` 奇数（`or holdings[0]` 回退路径） | PASS |
+| 止损卖出失败（`success=False`） | PASS |
+| 止盈卖出失败 | PASS |
+| `execute_sell` 返回非 dict（字符串） | PASS |
+| `execute_sell` 返回 None | PASS |
+| 多只持仓混合（止损/止盈/减仓/持有） | PASS |
+| 多只持仓全部 HOLD | PASS |
+| `成本价 = 0`（除零保护） | PASS |
+| `market_state` 为 None | PASS |
+| `holdings` 类型非法（字符串）→ 内部 `AttributeError` 被捕获 | PASS |
+| `execute_sell` 抛异常路径 | PASS |
+| 合计 25/25 三项全等 | PASS |
+
+覆盖到的分支：`SELL_STOP_LOSS`/`TAKE_PROFIT`/`REDUCE`/`HOLD` 四种动作、两支阈值的边界
+（-8% / 20%）、`json.loads` 与 dict 双路径、卖出成功/失败/非 dict 三种返回、除零保护、
+异常早退路径。
+
+### 41.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `python -m compileall -q agents/portfolio_rebalancer.py` | CE=0 |
+| `pytest tests/ -q` | 125 passed |
+
+### 41.5 说明
+
+- 语义零变化：所有阈值（-8% / 20% / 熊市+5% / 牛市+0%）、通知文案（含 `🔴` / `🟢` 与
+  `:.1f` 格式化）、`rebalance_actions` 与 `actions_taken` 的字段和键序全部逐字保留。
+- `_stop_loss` / `_take_profit` 用「返回 `None` 表示未执行」代替旧版的嵌套 `if`，
+  由 `_execute_rebalance_actions` 统一 append，避免在循环里写两段重复的记账逻辑。
+- 这是本轮最后一个 `agents/*.py` 的同构 `run()` 拆分；至此三个 agent 编排入口全部精简完毕。
