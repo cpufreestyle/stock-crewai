@@ -486,115 +486,89 @@ def calculate_performance_metrics():
     history_dir.mkdir(exist_ok=True)
     return compute_metrics(read_total_values(history_dir))
 
-def run_once():
-    """单次运行"""
-    print("\n" + "=" * 60)
-    print(f"  虚拟盘自动交易 v4.0 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
-    print("=" * 60 + "\n")
-    
-    # 清理过期日志
-    cleanup_old_logs()
-    
+
+# ========== 运行快照与展示辅助 ==========
+def _load_snapshot(fallback_capital):
+    """读取一次持仓快照，返回 (positions, cash, total_capital)"""
     portfolio = pt.load_portfolio()
     positions = portfolio.get("positions", {})
     cash = portfolio.get("cash", 100000)
-    total_capital = portfolio.get("total_capital", 100000)
-    
-    # 市场状态
-    market_regime = df.get_simple_market_regime()
-    print(f"[市场] {market_regime}\n")
-    
-    # 获取实时行情
-    print("=== 获取实时行情 ===")
-    realtime_data = df.get_sina_realtime(STOCK_POOL)
-    print(f"获取到 {len(realtime_data)} 只股票\n")
-    
-    # 检查持仓风险
-    print("=== 检查持仓风险 ===")
-    alerts = check_portfolio_risk(positions, realtime_data)
-    
-    sells = []
-    buys = []
-    
-    if alerts:
-        print(f"发现 {len(alerts)} 个风险信号:")
-        for alert in alerts:
-            icon = "🚨" if alert["action"] == "STOP_LOSS" else ("💰" if alert["action"] == "TAKE_PROFIT" else "⚠️")
-            print(f"  {icon} {alert['name']}: {alert['reason']}")
-        
-        sells = execute_sell(positions, alerts, realtime_data)
-        if sells:
-            print(f"\n已卖出 {len(sells)} 只股票")
-            for s in sells:
-                icon = "📉" if s["pnl"] < 0 else "📈"
-                print(f"  {icon} {s['name']}: {s['shares']}股 @ {s['price']:.2f}元 ({s['pnl']:+.2f}元)")
-    else:
+    return (
+        positions,
+        cash,
+        portfolio.get("total_capital", fallback_capital),
+    )
+
+
+def _print_alerts(alerts):
+    """打印风险信号列表"""
+    if not alerts:
         print("  无风险信号\n")
-    
-    # 刷新持仓
-    portfolio = pt.load_portfolio()
-    positions = portfolio.get("positions", {})
-    cash = portfolio.get("cash", 100000)
-    
-    # 筛选买入候选
-    print("\n=== 筛选买入候选 ===")
-    candidates = advanced_filter(realtime_data, positions, cash, total_capital)
-    
-    if candidates:
-        print(f"候选 {len(candidates)} 只，选取前 3 只:")
-        for i, cand in enumerate(candidates[:3], 1):
-            print(f"  {i}. {cand['name']}: {cand['price']:.2f}元 (+{cand['change_pct']:.2f}%) 评分{cand['tech_score']}")
-        
-        print("\n=== 执行买入 ===")
-        buys = execute_buy(candidates, positions, cash, total_capital, realtime_data)
-        
-        if buys:
-            print(f"已买入 {len(buys)} 只股票:")
-            for b in buys:
-                print(f"  📈 {b['name']}: {b['shares']}股 @ {b['price']:.2f}元 止损{b['stop_loss']} 目标{b['take_profit']}")
+        return
+    print(f"发现 {len(alerts)} 个风险信号:")
+    for alert in alerts:
+        if alert["action"] == "STOP_LOSS":
+            icon = "\U0001F6A8"
+        elif alert["action"] == "TAKE_PROFIT":
+            icon = "\U0001F4B0"
         else:
-            print("  无符合条件的股票")
-    else:
-        print("  无候选股票")
-    
-    # 刷新持仓
-    portfolio = pt.load_portfolio()
-    positions = portfolio.get("positions", {})
-    cash = portfolio.get("cash", 100000)
-    total_value = portfolio.get("total_value", total_capital)
-    total_return_pct = portfolio.get("total_return_pct", 0)
-    
-    # 计算绩效指标
-    metrics = calculate_performance_metrics()
-    
-    # 显示持仓
-    print("\n" + "=" * 60)
-    print(f"  持仓状态 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
-    print("=" * 60 + "\n")
-    
-    print(f"当前持仓（总资产: {total_value:,.2f}元, 总收益: {total_return_pct:+.2f}%, 现金: {cash:,.2f}元）:")
-    
+            icon = "\u26A0"
+        print(f"  {icon} {alert['name']}: {alert['reason']}")
+
+
+def _print_sells(sells):
+    """打印已卖出列表"""
+    if not sells:
+        return
+    print(f"\n已卖出 {len(sells)} 只股票")
+    for item in sells:
+        icon = "\U0001F4C9" if item["pnl"] < 0 else "\U0001F4C8"
+        print(f"  {icon} {item['name']}: {item['shares']}股 @ {item['price']:.2f}元 ({item['pnl']:+.2f}元)")
+
+
+def _print_buys(buys):
+    """打印已买入列表"""
+    if not buys:
+        print("  无符合条件的股票")
+        return
+    print(f"已买入 {len(buys)} 只股票:")
+    for item in buys:
+        print(f"  \U0001F4C8 {item['name']}: {item['shares']}股 @ {item['price']:.2f}元 止损{item['stop_loss']} 目标{item['take_profit']}")
+
+
+def _print_positions(positions, realtime_data):
+    """打印当前持仓与涨跌"""
     for code, pos in positions.items():
-        current_price = realtime_data.get(code, {}).get("current", pos.get("last_price", pos["avg_cost"]))
+        current_price = realtime_data.get(code, {}).get(
+            "current", pos.get("last_price", pos["avg_cost"])
+        )
         pnl_pct = (current_price - pos["avg_cost"]) / pos["avg_cost"] * 100
-        icon = "📈" if pnl_pct > 0 else ("📉" if pnl_pct < 0 else "➡️")
-        
+        if pnl_pct > 0:
+            icon = "\U0001F4C8"
+        elif pnl_pct < 0:
+            icon = "\U0001F4C9"
+        else:
+            icon = "\u27A1"
         print(f"  {icon} {code} {pos['name']}: {pos['shares']}股 @ {pos['avg_cost']:.2f}元, "
               f"现价{current_price:.2f}元 ({pnl_pct:+.2f}%), "
               f"止损={pos.get('stop_loss', 'N/A')}, 止盈={pos.get('take_profit', 'N/A')}")
-    
-    # 显示绩效指标
-    if metrics:
-        print(f"\n📊 绩效指标（近{metrics['total_days']}条数据）:")
-        print(f"   夏普比率: {metrics['sharpe_ratio']} | 最大回撤: {metrics['max_drawdown']}%")
-        print(f"   年化收益: {metrics['annual_return']}% | 年化波动: {metrics['annual_volatility']}%")
-        print(f"   胜率: {metrics['win_rate']}%")
-    
-    # 保存运行日志
+
+
+def _print_metrics(metrics):
+    """打印绩效指标"""
+    if not metrics:
+        return
+    print(f"\n\U0001F4CA 绩效指标（近{metrics['total_days']}条数据）:")
+    print(f"   夏普比率: {metrics['sharpe_ratio']} | 最大回撤: {metrics['max_drawdown']}%")
+    print(f"   年化收益: {metrics['annual_return']}% | 年化波动: {metrics['annual_volatility']}%")
+    print(f"   胜率: {metrics['win_rate']}%")
+
+
+def _write_run_log(portfolio, candidates, alerts, buys, sells, metrics):
+    """把一次运行的快照写入 history/run_log_*.json，返回日志路径"""
     log_file = Path(__file__).parent / "history" / f"run_log_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
     log_file.parent.mkdir(exist_ok=True)
-    
-    with open(log_file, "w", encoding="utf-8") as f:
+    with open(log_file, "w", encoding="utf-8") as handle:
         json.dump({
             "timestamp": datetime.now().isoformat(),
             "portfolio": portfolio,
@@ -603,40 +577,82 @@ def run_once():
             "buys": buys,
             "sells": sells,
             "metrics": metrics
-        }, f, ensure_ascii=False, indent=2)
-    
+        }, handle, ensure_ascii=False, indent=2)
+    return log_file
+
+
+def _record_net_value(total_value, cash, return_pct, positions_count, metrics):
+    """追加一条净值历史，同一分钟只记一次，最多保留 1000 条"""
+    nv_file = Path(__file__).parent / NET_VALUE_HISTORY_FILE
+    history = []
+    if nv_file.exists():
+        with open(nv_file, "r", encoding="utf-8") as handle:
+            history = json.load(handle)
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if history and history[-1].get("timestamp", "")[:16] == stamp:
+        return
+    history.append({
+        "timestamp": datetime.now().isoformat(),
+        "total_value": total_value,
+        "cash": cash,
+        "return_pct": return_pct,
+        "positions": positions_count,
+        "sharpe": metrics.get("sharpe_ratio", "N/A") if metrics else "N/A",
+        "max_drawdown": metrics.get("max_drawdown", "N/A") if metrics else "N/A",
+    })
+    with open(nv_file, "w", encoding="utf-8") as handle:
+        json.dump(history[-1000:], handle, ensure_ascii=False, indent=2)
+
+def run_once():
+    """单次运行"""
+    print("\n" + "=" * 60)
+    print(f"  虚拟盘自动交易 v4.0 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
+    print("=" * 60 + "\n")
+    cleanup_old_logs()
+    positions, cash, total_capital = _load_snapshot(100000)
+    market_regime = df.get_simple_market_regime()
+    print(f"[市场] {market_regime}\n")
+    print("=== 获取实时行情 ===")
+    realtime_data = df.get_sina_realtime(STOCK_POOL)
+    print(f"获取到 {len(realtime_data)} 只股票\n")
+    print("=== 检查持仓风险 ===")
+    alerts = check_portfolio_risk(positions, realtime_data)
+    _print_alerts(alerts)
+    sells = []
+    if alerts:
+        sells = execute_sell(positions, alerts, realtime_data)
+        _print_sells(sells)
+    positions, cash, total_capital = _load_snapshot(total_capital)
+    print("\n=== 筛选买入候选 ===")
+    candidates = advanced_filter(realtime_data, positions, cash, total_capital)
+    buys = []
+    if candidates:
+        print(f"候选 {len(candidates)} 只，选取前 3 只:")
+        for index, cand in enumerate(candidates[:3], 1):
+            print(f"  {index}. {cand['name']}: {cand['price']:.2f}元 (+{cand['change_pct']:.2f}%) 评分{cand['tech_score']}")
+        print("\n=== 执行买入 ===")
+        buys = execute_buy(candidates, positions, cash, total_capital, realtime_data)
+        _print_buys(buys)
+    else:
+        print("  无候选股票")
+    portfolio = pt.load_portfolio()
+    positions = portfolio.get("positions", {})
+    cash = portfolio.get("cash", 100000)
+    total_value = portfolio.get("total_value", total_capital)
+    total_return_pct = portfolio.get("total_return_pct", 0)
+    metrics = calculate_performance_metrics()
+    print("\n" + "=" * 60)
+    print(f"  持仓状态 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
+    print("=" * 60 + "\n")
+    print(f"当前持仓（总资产: {total_value:,.2f}元, 总收益: {total_return_pct:+.2f}%, 现金: {cash:,.2f}元）:")
+    _print_positions(positions, realtime_data)
+    _print_metrics(metrics)
+    log_file = _write_run_log(portfolio, candidates, alerts, buys, sells, metrics)
     print(f"\n运行日志已保存: {log_file}")
-    
-    # 记录净值历史
     try:
-        nv_file = Path(__file__).parent / NET_VALUE_HISTORY_FILE
-        history = []
-        if nv_file.exists():
-            with open(nv_file, "r", encoding="utf-8") as nvf:
-                history = json.load(nvf)
-        
-        # 避免同一分钟重复记录
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        if not history or history[-1].get("timestamp", "")[:16] != ts:
-            history.append({
-                "timestamp": datetime.now().isoformat(),
-                "total_value": total_value,
-                "cash": cash,
-                "return_pct": total_return_pct,
-                "positions": len(positions),
-                "sharpe": metrics.get("sharpe_ratio", "N/A") if metrics else "N/A",
-                "max_drawdown": metrics.get("max_drawdown", "N/A") if metrics else "N/A",
-            })
-            
-            # 保留最近 1000 条记录
-            if len(history) > 1000:
-                history = history[-1000:]
-            
-            with open(nv_file, "w", encoding="utf-8") as nvf:
-                json.dump(history, nvf, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"净值历史记录失败: {e}")
-    
+        _record_net_value(total_value, cash, total_return_pct, len(positions), metrics)
+    except Exception as exc:
+        print(f"净值历史记录失败: {exc}")
     return portfolio
 
 

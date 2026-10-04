@@ -1766,3 +1766,52 @@ powershell 命令行里的 `codex` 判断进程，在本机已无意义。继续
 
 - `compileall -q agents tests tools <根目录 .py>`：CE=0
 - `pytest tests/ -q`：125 passed, 22 warnings（与 29.4 基线一致，无回归）
+
+
+## 三十二、拆分 run_once() 超长函数（2026-10-05）
+
+### 32.1 背景
+
+`run_virtual_v4.py` 的 `run_once()` 是仓库里最大的单函数（152 行），
+承担了持仓快照加载、风险告警打印、卖出/买入结果打印、持仓明细打印、
+绩效指标打印、运行日志落盘、净值曲线记录七类互不相关的职责，
+读一遍要滚三次屏，改任何一段都要通读全文。
+
+它的测试覆盖为零：`tests/test_run_virtual_risk.py`(18 例) 只钉
+`check_portfolio_risk` 与 ATR 动态止损，`tests/test_execute_orders.py` 只钉
+`execute_buy`/`execute_sell`，没有任何用例触碰 `run_once` 内部的
+打印顺序或日志字段。零覆盖 + 职责混杂，正是安全拆分的窗口。
+
+### 32.2 拆分方案
+
+`run_once()` 保留编排骨架，八个辅助函数按职责抽出（均在
+`run_virtual_v4.py` 内，未新增文件）：
+
+- `_load_snapshot(fallback_capital)` → `(positions, cash, total_capital)`
+- `_print_alerts(alerts)` / `_print_sells(sells)` / `_print_buys(buys)`
+- `_print_positions(positions, realtime_data)` / `_print_metrics(metrics)`
+- `_write_run_log(portfolio, candidates, alerts, buys, sells, metrics)` → log_file
+- `_record_net_value(total_value, cash, return_pct, positions_count, metrics)`
+  （同一分钟不重复记，最多保留 1000 条）
+
+未改动任何业务判定、阈值或顺序，纯属搬运。
+
+### 32.3 验证证据
+
+- `py_compile run_virtual_v4.py`：CE=0
+- `compileall -q agents tests tools core workflows <根目录 .py>`：CE=0
+- `pytest tests/ -q`：125 passed, 22 warnings（与 29.4 基线一致，无回归）
+
+### 32.4 后续候选
+
+按 31 节口径继续扫超大函数：
+
+- `crew.py:306 run_daily_analysis` 196 行
+- `crew.py:45 prepare_market_data` 118 行
+- `backtest.py:11 backtest_strategy` 218 行、`multi_strategy_backtest` 161 行
+- `core/orchestrator.py:34 Orchestrator` 285 行类
+
+另有两处收敛项待定：`workflows/daily_analysis.py` 与 `crew.py` 的
+`run_daily_analysis` 功能重叠（workflows 已被 23 节定位为替代实现，
+但 `core/scheduler.py:27` 仍包着 crew 版）；`portfolio_tracker.py` 与
+`recommendation_tracker.py` 各有一份重复的 `ensure_dirs()`。
