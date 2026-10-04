@@ -1,8 +1,5 @@
 """风控熔断模块 - 连续亏损/单日回撤过大时暂停交易"""
-import json
-import os
 from datetime import datetime, timedelta
-from typing import Optional
 
 from config import (
     CIRCUIT_BREAKER_DAILY_LOSS_PCT,

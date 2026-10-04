@@ -46,6 +46,13 @@ MIN_TECH_SCORE = 60            # 最低技术评分（低于此分数不买入�
 NEAR_TAKE_PROFIT_PCT = 0.90    # 接近止盈线的阈值（止盈利润的 90%）
 STOP_LOSS_CHECK_ENABLED = True # 是否启用止损检查
 ATR_STOP_LOSS_ENABLED = True   # 是否启用 ATR 动态止损
+# ========================
+# 煦断 (circuit_breaker.py)
+# ========================
+CIRCUIT_BREAKER_DAILY_LOSS_PCT = 8.0   # 单日亏损达到该百分比触发熔断
+CIRCUIT_BREAKER_CONSECUTIVE_STOPS = 3  # 连续N次止损后触发熔断
+CIRCUIT_BREAKER_COOLDOWN_MINUTES = 60  # 熔断后的冷却时长（分钟）
+CIRCUIT_BREAKER_FILE = "circuit_breaker_state.json"
 
 # ========================
 # API 缓存 TTL（秒）

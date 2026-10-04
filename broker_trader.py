@@ -12,10 +12,8 @@
 """
 import json
 import os
-import time
 from datetime import datetime
-from typing import Dict, List, Optional
-import sys
+from typing import Dict, List
 
 # 尝试导入 efinance（东方财富开源库）
 try:
