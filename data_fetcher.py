@@ -326,66 +326,6 @@ def get_batch_stock_prices(codes: List[str], max_workers: int = 5) -> Dict[str, 
     return results
 
 
-def get_stock_info(stock_code: str) -> Dict:
-    """获取股票基本信息（新浪直连优先）"""
-    # 新浪直连接口
-    try:
-        if stock_code.startswith(('6', '9')):
-            symbol = f"sh{stock_code}"
-        else:
-            symbol = f"sz{stock_code}"
-        url = f"https://hq.sinajs.cn/list={symbol}"
-        headers = {
-            'Referer': 'https://finance.sina.com.cn',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        r = requests.get(url, headers=headers, timeout=10)
-        r.encoding = 'gbk'
-        if '=' in r.text and '"' in r.text:
-            data_str = r.text.split('="')[1].rstrip('";\n')
-            parts = data_str.split(',')
-            if len(parts) >= 32:
-                return {
-                    '股票简称': parts[0],
-                    '开盘价': parts[1],
-                    '昨收': parts[2],
-                    '当前价': parts[3],
-                    '最高': parts[4],
-                    '最低': parts[5],
-                    '成交量(手)': parts[8],
-                    '成交额(万)': parts[9],
-                    '日期': parts[30],
-                    '时间': parts[31],
-                }
-    except Exception as e:
-        print(f"[数据] {stock_code} 新浪基本信息失败: {e}")
-    # 降级 akshare
-    try:
-        df = ak.stock_individual_info_em(symbol=stock_code)
-        info = dict(zip(df["item"].tolist(), df["value"].tolist()))
-        return info
-    except Exception as e:
-        print(f"[数据] 获取基本信息失败 {stock_code}: {e}")
-        return {}
-
-
-def get_financials(stock_code: str) -> Dict:
-    """获取财务数据"""
-    try:
-        df = ak.stock_financial_analysis_indicator(symbol=stock_code)
-        latest = df.iloc[0].to_dict() if not df.empty else {}
-        return latest
-    except Exception as e:
-        return {}
-
-
-# 腾讯行情一次请求可带出全池估值字段，序号已与东财 f9/f23/f20 逐项核对一致
-_TENCENT_PE_TTM = 39
-_TENCENT_MARKET_CAP = 45   # 单位：亿元
-_TENCENT_PB = 46
-_TENCENT_PE_DYNAMIC = 52
-
-
 def _tencent_symbol(code: str) -> str:
     return ("sh" if code.startswith(("6", "9")) else "sz") + code
 
