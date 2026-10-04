@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta
 
 import data_fetcher as df
+from quant_metrics import calculate_max_drawdown, calculate_sharpe
 
 
 def backtest_strategy(
@@ -225,38 +226,6 @@ def backtest_strategy(
     print(f"\n结果已保存: {output_file}")
 
     return result
-
-
-def calculate_max_drawdown(values: list) -> float:
-    """计算最大回撤"""
-    if not values:
-        return 0.0
-
-    peak = values[0]
-    max_dd = 0.0
-
-    for v in values:
-        if v > peak:
-            peak = v
-        dd = (peak - v) / peak * 100
-        if dd > max_dd:
-            max_dd = dd
-
-    return max_dd
-
-
-def calculate_sharpe(returns: list, risk_free: float = 0.0) -> float:
-    """计算夏普比率"""
-    if len(returns) < 2:
-        return 0.0
-
-    mean_ret = sum(returns) / len(returns)
-    std_ret = (sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)) ** 0.5
-
-    if std_ret == 0:
-        return 0.0
-
-    return (mean_ret - risk_free) / std_ret
 
 
 def multi_strategy_backtest(code: str, days: int = 90) -> dict:

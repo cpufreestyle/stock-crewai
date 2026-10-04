@@ -5,38 +5,7 @@ import json
 import os
 from datetime import datetime
 import portfolio_tracker as pt
-
-
-def calculate_max_drawdown(values: list) -> float:
-    """计算最大回撤"""
-    if not values:
-        return 0.0
-    
-    peak = values[0]
-    max_dd = 0.0
-    
-    for v in values:
-        if v > peak:
-            peak = v
-        dd = (peak - v) / peak
-        if dd > max_dd:
-            max_dd = dd
-    
-    return max_dd * 100
-
-
-def calculate_sharpe(returns: list, risk_free: float = 0.0) -> float:
-    """计算夏普比率（简化版）"""
-    if len(returns) < 2:
-        return 0.0
-    
-    mean_ret = sum(returns) / len(returns)
-    std_ret = (sum((r - mean_ret) ** 2 for r in returns) / (len(returns) - 1)) ** 0.5
-    
-    if std_ret == 0:
-        return 0.0
-    
-    return (mean_ret - risk_free) / std_ret
+from quant_metrics import calculate_max_drawdown, calculate_sharpe
 
 
 def generate_report():
