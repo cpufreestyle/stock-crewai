@@ -303,79 +303,46 @@ def build_agents() -> dict:
     }
 
 
-def run_daily_analysis(with_backtest: bool = True) -> str:
-    """运行每日分析流程"""
-    print(f"\n{'='*60}")
-    print(f"  A股多智能体炒股系统 v3.0 - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"{'='*60}\n")
-    
-    # 1. 准备市场数据（heat/regime 先取好，步骤 8/9 复用，避免二次请求）
-    print("[1/8] 准备市场数据...")
-    heat = df.get_market_heat()
-    regime = df.get_market_regime()
-    market_data = prepare_market_data(heat=heat, regime=regime)
-    print("[完成]\n")
-    
-    # 2. 检查 API Key
-    api_key = config.API_KEY
-    if not api_key or api_key == "sk-your-key-here":
-        print("[错误] 请先在 .env 中配置 API Key")
-        return "未配置 API Key"
-    
-    # 3. 检查止损止盈
-    print("[2/8] 检查持仓止损止盈...")
+
+def _check_stop_loss_and_notify():
+    """检查持仓止损止盈，逐条打印并推送微信。"""
     triggered = pt.check_stop_loss()
-    if triggered:
-        for t in triggered:
-            msg = f"⚠ {t['name']}: {t['action']} @ {t['current_price']}元 ({t.get('loss_pct', t.get('profit_pct', 0))}%)"
-            print(msg)
-            notify_wechat(msg)
-    print("[完成]\n")
-    
-    # 4. 追踪历史推荐
-    print("[3/8] 追踪历史推荐表现...")
+    for t in triggered:
+        msg = f"⚠ {t['name']}: {t['action']} @ {t['current_price']}元 ({t.get('loss_pct', t.get('profit_pct', 0))}%)"
+        print(msg)
+        notify_wechat(msg)
+
+
+def _track_history_recommendations():
+    """追踪历史推荐表现，失败只打印不中断流程。"""
     try:
-        perf = rt.get_performance_summary([5, 10])
-        print(perf[:500])
+        print(rt.get_performance_summary([5, 10])[:500])
     except Exception as e:
         print(f"追踪失败: {e}")
-    print("[完成]\n")
-    
-    # 5. 创建 Agents
-    print("[4/8] 初始化 CrewAI Agents...")
-    agents = build_agents()
-    market_watcher = agents["market_watcher"]
-    researcher = agents["researcher"]
-    risk_mgr = agents["risk_mgr"]
-    trader = agents["trader"]
-    sentiment_analyst = agents["sentiment_analyst"]
-    backtest_validator = agents["backtest_validator"]
-    rebalancer = agents["rebalancer"]
-    print("[完成]\n")
-    
-    # 6. 构建任务链
-    print("[5/8] 构建任务流水线...")
 
+
+def _build_task_pipeline(agents, market_data):
+    """构建七个任务的上下文流水线，按依赖顺序返回 task 列表。"""
     # 说明：CrewAI 不会把描述里的 "{{某任务.output}}" 内插成上游输出，
     # 那种写法会把占位符原样送进 prompt（实测风控/交易/调仓任务都中招）。
     # 唯一的传递机制是 Task.context，所以下面把描述里引用到的每个上游任务都补进 context。
-    market_task = create_market_analysis_task(market_watcher, market_data)
+    market_task = create_market_analysis_task(agents["market_watcher"], market_data)
 
     research_task = create_research_task(
-        researcher,
+        agents["researcher"],
         market_analysis=CTX_REF_MARKET,
         stock_data=market_data
     )
     research_task.context = [market_task]
-    
+
     risk_task = create_risk_task(
-        risk_mgr,
+        agents["risk_mgr"],
         stock_picks=CTX_REF_RESEARCH,
         market_analysis=CTX_REF_MARKET
     )
-    
+
     trading_task = create_trading_task(
-        trader,
+        agents["trader"],
         research=CTX_REF_RESEARCH,
         risk=CTX_REF_RISK,
         market=CTX_REF_MARKET
@@ -383,13 +350,13 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
 
     # 新增任务（在 research_task 之后、risk_task 之前插入情绪分析和回测）
     sentiment_task = create_sentiment_task(
-        sentiment_analyst,
+        agents["sentiment_analyst"],
         stock_picks=CTX_REF_RESEARCH
     )
     sentiment_task.context = [research_task]
 
     backtest_task = create_backtest_task(
-        backtest_validator,
+        agents["backtest_validator"],
         stock_picks=CTX_REF_RESEARCH
     )
     backtest_task.context = [research_task, sentiment_task]
@@ -400,61 +367,60 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
 
     # 在 trading_task 之后添加调仓任务
     rebalance_task = create_rebalance_task(
-        rebalancer,
+        agents["rebalancer"],
         trade_plan=CTX_REF_TRADING,
         market_state=CTX_REF_MARKET
     )
     rebalance_task.context = [trading_task, market_task, risk_task]
-    print("[完成]\n")
-    
-    # 7. 执行 Crew
-    print("[6/8] 启动 CrewAI 编排（顺序模式，约2-4分钟）...")
+
+    return [market_task, research_task, sentiment_task, backtest_task,
+            risk_task, trading_task, rebalance_task]
+
+
+def _run_crew_pipeline(agents, tasks):
+    """以顺序模式启动 Crew 并返回 (result_str, degenerate_warnings)。"""
     crew = Crew(
-        agents=[market_watcher, researcher, sentiment_analyst, backtest_validator, risk_mgr, trader, rebalancer],
-        tasks=[market_task, research_task, sentiment_task, backtest_task, risk_task, trading_task, rebalance_task],
+        agents=list(agents.values()),
+        tasks=tasks,
         process=Process.sequential,  # 优化：从 hierarchical 改为 sequential，速度提升 2-3 倍
         verbose=True
     )
-    
+
     result = crew.kickoff()
-    result_str = str(result)
-    plan = None
 
     # 退化输出检查：本地模型偶发 @ 复读（run7 交易呓/调仓师），
     # CrewAI 不会报错，这里显式抢回来，避免报告里混入垃圾还不知情。
-    degenerate = check_degenerate_tasks(crew)
-    for w in degenerate:
-        print(f"\n🚨 [假成功] {w}\n")
-    print("[完成]\n")
-    
-    # 8. 回测
-    print("[7/8] 对推荐股票进行历史回测...")
-    backtest_text = ""
-    if with_backtest:
-        import re
-        codes = re.findall(r'\b(000\d{3}|002\d{3}|600\d{3}|601\d{3}|603\d{3})\b', result_str)
-        unique_codes = list(set(codes))[:5]
-        if unique_codes:
-            backtest_text = run_backtest_for_picks(unique_codes)
-            print(backtest_text)
-    print("[完成]\n")
-    
-    # 9. 保存推荐记录
-    print("[8/8] 保存推荐记录...")
+    return str(result), check_degenerate_tasks(crew)
+
+
+def _extract_backtest(result_str: str, with_backtest: bool) -> str:
+    """从结果文本里抽取股票代码并跑历史回测。"""
+    if not with_backtest:
+        return ""
+    import re
+    codes = re.findall(r'\b(000\d{3}|002\d{3}|600\d{3}|601\d{3}|603\d{3})\b', result_str)
+    unique_codes = list(set(codes))[:5]
+    if not unique_codes:
+        return ""
+    backtest_text = run_backtest_for_picks(unique_codes)
+    print(backtest_text)
+    return backtest_text
+
+
+def _save_recommendations(result_str: str, heat: dict, regime: dict, plan):
+    """解析交易计划并落库推荐记录；结构化优先，失败回退自由文本正则。"""
     try:
         # 结构化交易计划优先（参照 TradingAgents 的 pydantic schema 模式）；
         # 解析不到才回退旧的自由文本正则路径，不改变旧行为。
         plan = tp_plan.parse_trading_plan(result_str)
-        parse_mode = "structured"
         if plan is not None:
             stocks = tp_plan.plan_to_recommendations(plan)
             print(f"[结构化解析] {len(plan.actions)} 条动作，可追踪推荐 {len(stocks)} 只")
         else:
             stocks = rt.parse_trading_result(result_str)
-            parse_mode = "legacy-regex"
             print("[结构化解析] 未命中 JSON 块，回退自由文本解析")
         if stocks:
-            # 复用 [1/8] 已取的 heat/regime，不再重复请求
+            # 调用方预先取好的 heat/regime 直接复用，不再重复请求
             rt.save_recommendation(
                 stocks=stocks,
                 market_status=heat.get("市场状态", ""),
@@ -464,8 +430,12 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
             print(f"已保存 {len(stocks)} 只推荐股票到追踪系统")
     except Exception as e:
         print(f"保存推荐失败: {e}")
-    
-    # 保存完整报告
+    return plan
+
+
+def _compose_report(result_str: str, backtest_text: str, degenerate: list,
+                   regime: dict, plan) -> str:
+    """拼装完整报告（含退化告警、回测、风险报告、持仓摘要）并落盘。"""
     if degenerate:
         result_str = ("\n> 🚨 警告：以下任务输出退化（单字符复读），内容不可用："
                       + "\u3001".join(degenerate) + "\n\n") + result_str
@@ -474,31 +444,93 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
     full_report += result_str
     if backtest_text:
         full_report += f"\n\n{backtest_text}"
-    
+
     # 风险报告
     try:
         pf = pt.load_portfolio()
-        risk_report = rm.daily_risk_report(pf, regime.get("regime", "震荡市"))
-        full_report += f"\n\n---\n{risk_report}\n"
-    except:
+        full_report += f"\n\n---\n{rm.daily_risk_report(pf, regime.get('regime', '震荡市'))}\n"
+    except Exception:
         pass
-    
+
     full_report += f"\n---\n{pt.get_portfolio_summary()}"
     if plan is not None:
         full_report += "\n\n---\n" + tp_plan.render_plan_summary(plan) + "\n"
-    
+
     with open("result_latest.md", "w", encoding="utf-8") as f:
         f.write(full_report)
     pt.save_daily_report(full_report)
-    
-    # 微信通知
+    return full_report
+
+
+def _notify_summary(result_str: str, backtest_text: str):
+    """推送截断后的短摘要到微信。"""
     short_summary = f"📊 炒股分析 {datetime.now().strftime('%m-%d %H:%M')}\n\n"
     short_summary += result_str[:600]
     if backtest_text:
         short_summary += f"\n\n{backtest_text[:300]}"
     notify_wechat(short_summary)
-    
+
+
+def run_daily_analysis(with_backtest: bool = True) -> str:
+    """运行每日分析流程"""
+    print(f"\n{'='*60}")
+    print(f"  A股多智能体炒股系统 v3.0 - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"{'='*60}\n")
+
+    api_key = config.API_KEY
+    if not api_key or api_key == "sk-your-key-here":
+        print("[错误] 请先在 .env 中配置 API Key")
+        return "未配置 API Key"
+
+    # 1. 准备市场数据（heat/regime 先取好，步骤 8/9 复用，避免二次请求）
+    print("[1/8] 准备市场数据...")
+    heat = df.get_market_heat()
+    regime = df.get_market_regime()
+    market_data = prepare_market_data(heat=heat, regime=regime)
+    print("[完成]\n")
+
+    # 2. 检查止损止盈
+    print("[2/8] 检查持仓止损止盈...")
+    _check_stop_loss_and_notify()
+    print("[完成]\n")
+
+    # 3. 追踪历史推荐
+    print("[3/8] 追踪历史推荐表现...")
+    _track_history_recommendations()
+    print("[完成]\n")
+
+    # 4. 创建 Agents
+    print("[4/8] 初始化 CrewAI Agents...")
+    agents = build_agents()
+    print("[完成]\n")
+
+    # 5. 构建任务链
+    print("[5/8] 构建任务流水线...")
+    tasks = _build_task_pipeline(agents, market_data)
+    print("[完成]\n")
+
+    # 6. 执行 Crew
+    print("[6/8] 启动 CrewAI 编排（顺序模式，约2-4分钟）...")
+    result_str, degenerate = _run_crew_pipeline(agents, tasks)
+    for w in degenerate:
+        print(f"\n🚨 [假成功] {w}\n")
+    print("[完成]\n")
+
+    # 7. 回测
+    print("[7/8] 对推荐股票进行历史回测...")
+    backtest_text = _extract_backtest(result_str, with_backtest)
+    print("[完成]\n")
+
+    # 8. 保存推荐记录
+    print("[8/8] 保存推荐记录...")
+    plan = _save_recommendations(result_str, heat, regime, None)
+
+    # 9. 保存报告并通知
+    full_report = _compose_report(result_str, backtest_text, degenerate, regime, plan)
+    _notify_summary(result_str, backtest_text)
+
     return full_report
+
 
 
 if __name__ == "__main__":
@@ -517,3 +549,4 @@ if __name__ == "__main__":
     print(f"{'='*60}")
     print(result)
     print("\n[已保存] result_latest.md + history/")
+

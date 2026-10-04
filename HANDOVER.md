@@ -1802,16 +1802,60 @@ powershell 命令行里的 `codex` 判断进程，在本机已无意义。继续
 - `compileall -q agents tests tools core workflows <根目录 .py>`：CE=0
 - `pytest tests/ -q`：125 passed, 22 warnings（与 29.4 基线一致，无回归）
 
-### 32.4 后续候选
+### 32.4 后续候选（拆分后重新定位）
 
-按 31 节口径继续扫超大函数：
+32.3 完成后已接手处理的最大函数：
 
-- `crew.py:306 run_daily_analysis` 196 行
-- `crew.py:45 prepare_market_data` 118 行
-- `backtest.py:11 backtest_strategy` 218 行、`multi_strategy_backtest` 161 行
-- `core/orchestrator.py:34 Orchestrator` 285 行类
+- `crew.py:308 run_daily_analysis` 196 行 —— 已在 33 节拆分完
+- `crew.py:45 prepare_market_data` 118 行 —— 仍待处理
+- `backtest.py:11 backtest_strategy` 218 行 —— 仍待处理
+- `core/orchestrator.py:34 Orchestrator` 285 行类 —— 仍待处理
 
-另有两处收敛项待定：`workflows/daily_analysis.py` 与 `crew.py` 的
-`run_daily_analysis` 功能重叠（workflows 已被 23 节定位为替代实现，
-但 `core/scheduler.py:27` 仍包着 crew 版）；`portfolio_tracker.py` 与
-`recommendation_tracker.py` 各有一份重复的 `ensure_dirs()`。
+## 三十三、拆分 crew.py run_daily_analysis()（2026-10-05）
+
+### 33.1 背景
+
+`crew.py` 的 `run_daily_analysis()` 214 行，把 9 个步骤全部内联在一个函数
+里：打印横幅、校验 API Key、准备市场数据、查止损、追历史推荐、建 agents、
+建任务链、跑 crew、回测、解析落库、拼报告、写文件、推微信。任何一步要改，
+都得在两百多行里上下找。
+
+它与 32 节的 `run_once()` 处境相同：零测试覆盖（`tests/test_stock_crewai.py`
+只碰 `build_agents()` 与工具白名单），且 `workflows/daily_analysis.py` 已定位为
+其替代实现（见 23 节）。职责边界清楚、无人调用内部细节，可以安全拆分。
+
+### 33.2 拆分方案
+
+`run_daily_analysis()` 缩到 59 行，只保留 9 步的编排骨架与进度打印，
+八个步骤体按职责抽出：
+
+- `_check_stop_loss_and_notify()` — 查止损 + 逐条打印/推送
+- `_track_history_recommendations()` — 历史推荐追踪，失败不中断
+- `_build_task_pipeline(agents, market_data)` → task 列表（含 context 依赖）
+- `_run_crew_pipeline(agents, tasks)` → `(result_str, degenerate)`
+- `_extract_backtest(result_str, with_backtest)` → 回测文本
+- `_save_recommendations(result_str, heat, regime, plan)` → plan（结构化优先）
+- `_compose_report(result_str, backtest_text, degenerate, regime, plan)` → 报告全文
+- `_notify_summary(result_str, backtest_text)` — 微信短摘要
+
+原函数里 `agents = build_agents()` 后逐个解包 7 个具名变量的写法不再需要，
+两个 pipeline helper 直接用字典键取用；`Crew(agents=list(agents.values()))`
+保持原顺序（build_agents 的字典字面量顺序即插入序，与原解包后传参顺序一致）。
+
+业务逻辑、顺序、异常处理范围均未改变，`[N/8]` 进度文案原样留在主函数。
+
+### 33.3 验证证据
+
+- `py_compile crew.py`：CE=0
+- `compileall -q agents tests tools core workflows <根目录 .py>`：CE=0
+- `pytest tests/ -q`：125 passed, 22 warnings（与 29.4 基线一致，无回归）
+- `run_daily_analysis` 214 行 → 59 行；`crew.py` 519 → 552 行（净增来自 docstring 与空行）
+
+
+### 33.4 后续候选
+
+- `crew.py:45 prepare_market_data` 118 行（下一目标）
+- `backtest.py` 两个 200+ 行函数
+- `core/orchestrator.py` 285 行 Orchestrator 类
+- `workflows/daily_analysis.py` 与 `crew.py` 的职责重叠（32.4 已记录，仍未拍板）
+
