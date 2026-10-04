@@ -1109,3 +1109,55 @@ Select-String -Path crew_run10.log -Pattern "Maximum iterations reached|absolute
 
 死代码扫描用 AST，别用正则。第一版正则漏掉多行 `from x import (a, b)`，报了 122 条假阳性；改成 `ast.walk` 收集 `ast.Name`，减去已用名后剩下的才是真死导入。删除前必须确认三件事：定义处是否为唯一引用、有无 `__main__` 调用、文档或装配是否提到。
 
+
+
+## 十九、代码精简续：模块拆分与指标合并（2026-10-04 晚）
+
+第十八节之后继续做了两件结构性的事，都跑满 56 测试。
+
+### 19.1 `data_fetcher.py` 拆包（`3647d6b`）
+
+716 行拆成 `data_sources/` 六个模块，`data_fetcher.py` 保留为再导出门面（46 行），
+所以 29 个调用点（`import data_fetcher as df` 后 `df.get_xxx`）零改动。
+
+- `_common.py` 220 行：代理绕过补丁、akshare 懒加载、A_SHARE_POOL、_sina_kline_direct
+- `kline_prices.py` 123 行：get_index_components / get_stock_price / get_batch_stock_prices
+- `fundamentals.py` 105 行：get_fundamental_batch / get_fundamental_data / get_news_sentiment
+- `market.py` 191 行：get_market_heat / get_market_regime / get_sector_performance
+- `technical.py` 83 行：calculate_technical
+- `quotes.py` 179 行：get_realtime_quotes / get_sina_realtime / get_simple_market_regime
+
+拆分前确认的关键事实（下次拆别处先查这些）：
+
+- 786 行全部有归属，按行区间六等分无丢行；
+- 跨段依赖只有一处：market 段调用 `_sina_kline_direct`，把它提到 `_common.py` 即消除循环导入；
+- 唯一的边界瑕疵是 `@cached` 装饰器落在上一段末尾，已移到 `quotes.py` 的 `get_realtime_quotes` 上；
+- 拆完必须做真实调用验证，不能只看 import：实测 `get_stock_price` 取回 250 行 K 线、
+  `calculate_technical` 算出 13 个指标、regime/heat 有数据、断网时优雅降级为震荡市。
+
+### 19.2 量化指标合并，并修掉一个共有 bug（`a23ae93`）
+
+`calculate_max_drawdown` / `calculate_sharpe` 在 `backtest.py` 与 `performance_report.py`
+各有一份，写法不同（一处 `(peak-v)/peak*100` 直接返回，另一处 `/peak` 后 `*100`）。
+已对正常输入做等价验证：回撤 33.3333、夏普完全相同，合并不改变行为。
+
+合并时发现两份代码共有的缺陷：**peak 为 0 时抛 `ZeroDivisionError`**，且崩在不同行号
+（backtest.py:241 与 performance_report.py 对应行）。收敛到 `quant_metrics.py` 后加
+`peak <= 0` 保护，返回 0.0。
+
+### 19.3 查过但**故意没动**的
+
+- `run_virtual_v4.py`（713 行，现最大文件）：它是 Docker/loop 的下单路径，而 `tests/` 里
+  唯一提到它的地方是一句注释——**零测试覆盖**。没有测试保护时拆会真实下单的生产路径，
+  风险显著高于收益，等有测试再拆。
+- `crew.py`（485 行）：仅 7 个函数且职责内聚（编排器本就这么长），拆散反而把流水线弄乱。
+- `tools/*.py` 的 8 个 `get_*_tools()` 工厂：AST 归一化后检出 market/trade 两份同构，但各自
+  返回不同的工具类清单；强行抽公共 helper 会让调用点看不出挂了哪些工具，可读性下降。
+- 461 行 `__main__` 演示块（27 个文件）：是能跑的 CLI 演示（如 `python strategy_momentum.py`
+  会打印行业动量报告），不是死代码；文档里没有登记入口，属于可用但未文档化，等用户拍板。
+
+### 19.4 顺手纠的文档漂移（`3113cf2`）
+
+README 的测试数从 48 改成 56；目录树补 `data_sources/`；更新日志加 v4.4.0。
+历史条目里的 48 个测试保留原样（那是 9/27 当天的事实）。
+
