@@ -51,28 +51,10 @@ def get_realtime_quotes(stock_codes: List[str], _retry: int = 2) -> List[Dict]:
                 data = r.json().get("data", {})
                 if not data:
                     continue
-                price = float(data.get("f43", 0) or 0) / 100
-                prev_close = float(data.get("f60", 0) or 0) / 100
-                open_price = float(data.get("f44", 0) or 0) / 100
-                high = float(data.get("f46", 0) or 0) / 100
-                low = float(data.get("f47", 0) or 0) / 100
-                change = float(data.get("f169", 0) or 0) / 100
-                change_pct = float(data.get("f170", 0) or 0) / 100
-                if price <= 0:
+                quote = _quote_from_eastmoney(data, code)
+                if quote is None:
                     continue
-                return {
-                    "code": data.get("f57", code),
-                    "name": data.get("f58") or _STOCK_NAME.get(code, code),
-                    "price": round(price, 2),
-                    "open": round(open_price, 2),
-                    "high": round(high, 2),
-                    "low": round(low, 2),
-                    "prev_close": round(prev_close, 2),
-                    "change": round(change, 2),
-                    "change_pct": round(change_pct, 2),
-                    "volume": 0,
-                    "amount": 0
-                }
+                return quote
             except Exception:
                 if attempt < _retry - 1:
                     import time; time.sleep(0.2)
@@ -83,25 +65,7 @@ def get_realtime_quotes(stock_codes: List[str], _retry: int = 2) -> List[Dict]:
                      f"/CN_MarketData.getKLineData?symbol={sinabase}&scale=240&ma=no&datalen=2")
             r2 = requests.get(url2, headers={"User-Agent": "Mozilla/5.0"}, timeout=4)
             r2.raise_for_status()
-            candles = r2.json()
-            if candles and len(candles) >= 1:
-                latest = candles[-1]
-                price = float(latest.get("close", 0))
-                prev = float(candles[0].get("close", price)) if len(candles) >= 2 else price
-                open_p = float(latest.get("open", price))
-                high_p = float(latest.get("high", price))
-                low_p = float(latest.get("low", price))
-                change_p = price - prev
-                change_pct_p = (change_p / prev * 100) if prev > 0 else 0
-                return {
-                    "code": code, "name": _STOCK_NAME.get(code, code),
-                    "price": round(price, 2), "open": round(open_p, 2),
-                    "high": round(high_p, 2), "low": round(low_p, 2),
-                    "prev_close": round(prev, 2),
-                    "change": round(change_p, 2),
-                    "change_pct": round(change_pct_p, 2),
-                    "volume": 0, "amount": 0
-                }
+            return _quote_from_sina_kline(code, r2.json())
         except Exception:
             pass
         return None
@@ -112,6 +76,61 @@ def get_realtime_quotes(stock_codes: List[str], _retry: int = 2) -> List[Dict]:
         if q:
             results.append(q)
     return results
+
+
+def _quote_from_eastmoney(data: dict, code: str) -> dict:
+    """把 push2 单股接口的 data 段转成统一行情 dict。
+
+    价格为分，需除以 100；价格 <= 0 时返回 None（调用方 continue 重试）。
+    """
+    price = float(data.get("f43", 0) or 0) / 100
+    prev_close = float(data.get("f60", 0) or 0) / 100
+    open_price = float(data.get("f44", 0) or 0) / 100
+    high = float(data.get("f46", 0) or 0) / 100
+    low = float(data.get("f47", 0) or 0) / 100
+    change = float(data.get("f169", 0) or 0) / 100
+    change_pct = float(data.get("f170", 0) or 0) / 100
+    if price <= 0:
+        return None
+    return {
+        "code": data.get("f57", code),
+        "name": data.get("f58") or _STOCK_NAME.get(code, code),
+        "price": round(price, 2),
+        "open": round(open_price, 2),
+        "high": round(high, 2),
+        "low": round(low, 2),
+        "prev_close": round(prev_close, 2),
+        "change": round(change, 2),
+        "change_pct": round(change_pct, 2),
+        "volume": 0,
+        "amount": 0
+    }
+
+
+def _quote_from_sina_kline(code: str, candles) -> dict:
+    """用新浪 K 线接口最后两根日线合成一条行情 dict。
+
+    candles 为空时返回 None；解析抛出的异常交给调用方兜底。
+    """
+    if not candles or len(candles) < 1:
+        return None
+    latest = candles[-1]
+    price = float(latest.get("close", 0))
+    prev = float(candles[0].get("close", price)) if len(candles) >= 2 else price
+    open_p = float(latest.get("open", price))
+    high_p = float(latest.get("high", price))
+    low_p = float(latest.get("low", price))
+    change_p = price - prev
+    change_pct_p = (change_p / prev * 100) if prev > 0 else 0
+    return {
+        "code": code, "name": _STOCK_NAME.get(code, code),
+        "price": round(price, 2), "open": round(open_p, 2),
+        "high": round(high_p, 2), "low": round(low_p, 2),
+        "prev_close": round(prev, 2),
+        "change": round(change_p, 2),
+        "change_pct": round(change_pct_p, 2),
+        "volume": 0, "amount": 0
+    }
 
 
 
