@@ -2371,3 +2371,89 @@ signal = _judge_signal(score)
 - `_stop_loss` / `_take_profit` 用「返回 `None` 表示未执行」代替旧版的嵌套 `if`，
   由 `_execute_rebalance_actions` 统一 append，避免在循环里写两段重复的记账逻辑。
 - 这是本轮最后一个 `agents/*.py` 的同构 `run()` 拆分；至此三个 agent 编排入口全部精简完毕。
+
+## 42. 拆分 run_virtual_v4.advanced_filter 为基础/技术/状态/仓位四段
+
+### 42.1 变更 lineage
+
+- `run_virtual_v4.py`：679 → 728 行（+49，全部为 docstring、空行与注释）
+- `advanced_filter()`：113 行 → 48 行（只保留遍历与编排）
+- 新增 5 个模块级 helper：`_passes_basic_filters` / `_base_tech_score` / `_tech_indicator_adjustment` / `_regime_allows` / `_resolve_shares`
+
+### 42.2 拆分原则
+
+- `advanced_filter()` 只保留「取市场状态 → 遍历标的 → 逐层过滤/打分 → 求解股数 → 收集 → 排序」。
+- 每层明确职责与退出语义：
+  - `_passes_basic_filters(data, change_pct, is_post_market)`：涨跌幅区间、股价上限、成交量下限
+  - `_base_tech_score(data, change_pct)`：不依赖指标模块的 4 项基础加分
+  - `_tech_indicator_adjustment(code, data, score)`：技术指标增强；返回二元组 `(分数, 是否需跳过)`，
+    因为原 `SELL` 分支是 `continue`（跳标的）而非扣分，无法用纯分数表达
+  - `_regime_allows(market_regime, tech_score)`：熊市评分门槛；牛市原本是 `pass`，无附加条件
+  - `_resolve_shares(data, cash, total_capital)`：单票上限 + 现金约束 + 整百股求解，
+    返回 `None` 表示买不起（对应原两处 `continue`）
+- 保留 `try/except: pass` 裸捕获与 `for code, data in realtime_data.items()` 遍历顺序。
+
+### 42.3 等价性验证（35 场景）
+
+方法：`git show HEAD:run_virtual_v4.py` 导出版本 A，当前工作区为版本 B，
+双模块加载，替换 `df.get_simple_market_regime`、`datetime.now`、`ti` 为可控假件，
+对比 `advanced_filter` 返回 list 的 JSON 全等（键序无关化）。
+
+| 场景 | 结果 |
+|---|---|
+| 空输入 | PASS |
+| 已持仓标的跳过 | PASS |
+| `current<=0` 跳过 | PASS |
+| 盘中低于 `MIN_CHANGE_PCT` | PASS |
+| 盘中高于 `MAX_CHANGE_PCT` | PASS |
+| 盘后低于 `MIN_CHANGE_PCT` | PASS |
+| 盘后区间内（放宽条件生效） | PASS |
+| `price>200` 跳过 | PASS |
+| `volume<100000` 跳过 | PASS |
+| `volume>500000` 加分 | PASS |
+| `current>open` 加分 | PASS |
+| 低于最高价 0.98 加分 | PASS |
+| `high=0` 除零保护 | PASS |
+| 好涨幅区间 +2 | PASS |
+| 最大涨幅区间 +1 | PASS |
+| 熊市低分被过滤 | PASS |
+| 熊市高分通过 | PASS |
+| 牛市常规通过 | PASS |
+| 现金极少致 `shares<100` | PASS |
+| 仓位超现金后减股 | PASS |
+| 减股后仍 `<100` | PASS |
+| `signal=STRONG_BUY` +3 | PASS |
+| `signal=BUY` +3 | PASS |
+| `signal=WEAK_SELL` -1 | PASS |
+| `signal=SELL` 跳过 | PASS |
+| `analyze_stock` 返回 `error` 键 | PASS |
+| `rsi<30` 加分 | PASS |
+| `rsi=0` 假值不加分 | PASS |
+| `macd_hist>0` 加分 | PASS |
+| 触及布林下轨 +2 | PASS |
+| 低于布林下轨 +2 | PASS |
+| `analysis` 为无键 dict | PASS |
+| 多标的排序（分数优先、涨幅次之） | PASS |
+| `realtime_data=None` 抛 `AttributeError`（旧版同） | PASS |
+| `TECH_AVAILABLE=False` 时跳过指标段 | PASS |
+| 合计 35/35 一致 | PASS |
+
+覆盖到的分支：盘前/盘中/盘后三套涨跌幅门、4 项基础加分各自真假值、5 种信号分档、
+RSI/MACD/BOLL 三项增强各自的真假值、熊市/牛市门槛、现金约束的两层减股与整百股回退。
+
+### 42.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `python -m compileall -q run_virtual_v4.py` | CE=0 |
+| `pytest tests/ -q` | 125 passed |
+
+### 42.5 说明
+
+- 语义零变化：全部阈值（`>200`、`<100000`、`>500000`、`*0.98`、`<5`、`<100`）、
+  打分权重（+1/+1/+2/+1/+3/-1/+1/+1/+2）、`candidates` 字段与排序键全部逐字保留。
+- 原「牛市 `pass`」分支在 `_regime_allows` 中体现为直接 `return True`，并在 `advanced_filter`
+  调用处保留一句注释说明牛市无额外门槛，避免误读为逻辑丢失。
+- 原 `elif market_regime == 牛市` 的 `pass` 不可观测，故 helper 只做熊市门槛判断。
+- `or True`（position_ratio 恒真）与 `test_holdings_without_live_quote_still_count` 钉住的
+  行为未触碰。

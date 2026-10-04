@@ -269,107 +269,152 @@ def execute_sell(portfolio_positions, alerts, realtime_data):
     return sells
 
 
-# ========== 高级筛选（技术指标增强） ==========
+def _passes_basic_filters(data, change_pct, is_post_market):
+    """基础粗筛：涨跌幅区间、股价上限、成交量下限。返回 False 表示跳过该标的"""
+    if is_post_market:
+        # 盘后：放宽筛选条件，关注技术信号
+        if change_pct <= MIN_CHANGE_PCT:
+            return False
+    else:
+        # 盘中：正常筛选
+        if not (MIN_CHANGE_PCT < change_pct <= MAX_CHANGE_PCT):
+            return False
+
+    if data["current"] > 200:
+        return False
+
+    if data["volume"] < 100000:
+        return False
+
+    return True
+
+
+def _base_tech_score(data, change_pct):
+    """基础技术评分（不依赖外部指标模块）"""
+    score = 0
+
+    if data["current"] > data["open"]:
+        score += 1
+
+    if GOOD_CHANGE_LOW < change_pct <= GOOD_CHANGE_HIGH:
+        score += 2
+    elif GOOD_CHANGE_HIGH < change_pct <= MAX_CHANGE_PCT:
+        score += 1
+
+    if data["volume"] > 500000:
+        score += 1
+
+    if data["high"] > 0 and data["current"] < data["high"] * 0.98:
+        score += 1
+
+    return score
+
+
+def _tech_indicator_adjustment(code, data, score):
+    """技术指标增强评分。返回 (调整后分数, 是否强烈看空需跳过)
+
+    scores 只在 TECH_AVAILABLE 时生效；模块缺失或分析异常时原样返回。
+    """
+    if not TECH_AVAILABLE:
+        return score, False
+
+    try:
+        analysis = ti.analyze_stock(code)
+        if "error" in analysis:
+            return score, False
+
+        # 信号评分
+        signal = analysis.get("signal", "NEUTRAL")
+        if signal in ["STRONG_BUY", "BUY"]:
+            score += 3
+        elif signal == "WEAK_SELL":
+            score -= 1
+        elif signal == "SELL":
+            return score, True  # 强烈卖出信号不买入
+
+        # RSI超卖加分
+        if analysis.get("rsi") and analysis["rsi"] < 30:
+            score += 1
+
+        # MACD金叉加分
+        if analysis.get("macd_hist") and analysis["macd_hist"] > 0:
+            score += 1
+
+        # 布林带下轨加分
+        if analysis.get("bollinger_lower") and data["current"] <= analysis["bollinger_lower"]:
+            score += 2
+    except:
+        pass
+
+    return score, False
+
+
+def _regime_allows(market_regime, tech_score):
+    """市场状态门槛：熊市要求更高评分，牛市维持常规可过"""
+    if market_regime == "熊市" and tech_score < 5:
+        return False  # 熊市要求更高评分
+    return True
+
+
+def _resolve_shares(data, cash, total_capital):
+    """按单票仓位上限与可用现金求解可买股数（A股整百股）。返回 None 表示买不起"""
+    max_position = total_capital * SINGLE_POSITION_RATIO
+    shares = int(max_position / data["current"] / 100) * 100
+
+    # A股最低100股限制
+    if shares < 100:
+        return None
+
+    position_value = shares * data["current"]
+    if position_value > cash:
+        # 尝试减少股数
+        shares = int(cash / data["current"] / 100) * 100
+        position_value = shares * data["current"]
+        if shares < 100:
+            return None
+
+    return shares, position_value
+
+
 def advanced_filter(realtime_data, portfolio_positions, cash, total_capital):
     """高级筛选策略（技术指标增强版）"""
     candidates = []
     market_regime = df.get_simple_market_regime()
-    
+
     for code, data in realtime_data.items():
         if code in portfolio_positions:
             continue
-        
+
         if data["current"] <= 0:
             continue
-        
+
         change_pct = data["change_pct"]
-        
+
         # 盘后策略适配：使用昨日涨跌幅
         now = datetime.now()
         is_post_market = now.hour >= 15
-        
-        if is_post_market:
-            # 盘后：放宽筛选条件，关注技术信号
-            if change_pct <= MIN_CHANGE_PCT:
-                continue
-        else:
-            # 盘中：正常筛选
-            if not (MIN_CHANGE_PCT < change_pct <= MAX_CHANGE_PCT):
-                continue
-        
-        if data["current"] > 200:
+
+        if not _passes_basic_filters(data, change_pct, is_post_market):
             continue
-        
-        if data["volume"] < 100000:
-            continue
-        
+
         # 计算技术评分
-        tech_score = 0
-        
-        # 基础评分
-        if data["current"] > data["open"]:
-            tech_score += 1
-        
-        if GOOD_CHANGE_LOW < change_pct <= GOOD_CHANGE_HIGH:
-            tech_score += 2
-        elif GOOD_CHANGE_HIGH < change_pct <= MAX_CHANGE_PCT:
-            tech_score += 1
-        
-        if data["volume"] > 500000:
-            tech_score += 1
-        
-        if data["high"] > 0 and data["current"] < data["high"] * 0.98:
-            tech_score += 1
-        
+        tech_score = _base_tech_score(data, change_pct)
+
         # 技术指标增强评分
-        if TECH_AVAILABLE:
-            try:
-                analysis = ti.analyze_stock(code)
-                if "error" not in analysis:
-                    # 信号评分
-                    signal = analysis.get("signal", "NEUTRAL")
-                    if signal in ["STRONG_BUY", "BUY"]:
-                        tech_score += 3
-                    elif signal == "WEAK_SELL":
-                        tech_score -= 1
-                    elif signal == "SELL":
-                        continue  # 强烈卖出信号不买入
-                    
-                    # RSI超卖加分
-                    if analysis.get("rsi") and analysis["rsi"] < 30:
-                        tech_score += 1
-                    
-                    # MACD金叉加分
-                    if analysis.get("macd_hist") and analysis["macd_hist"] > 0:
-                        tech_score += 1
-                    
-                    # 布林带下轨加分
-                    if analysis.get("bollinger_lower") and data["current"] <= analysis["bollinger_lower"]:
-                        tech_score += 2
-            except:
-                pass
-        
-        # 市场状态调整
-        if market_regime == "熊市" and tech_score < 5:
-            continue  # 熊市要求更高评分
-        elif market_regime == "牛市" and tech_score >= 3:
-            pass  # 牛市可降低要求
-        
-        max_position = total_capital * SINGLE_POSITION_RATIO
-        shares = int(max_position / data["current"] / 100) * 100
-        
-        # A股最低100股限制
-        if shares < 100:
+        tech_score, skip = _tech_indicator_adjustment(code, data, tech_score)
+        if skip:
             continue
-        
-        position_value = shares * data["current"]
-        if position_value > cash:
-            # 尝试减少股数
-            shares = int(cash / data["current"] / 100) * 100
-            position_value = shares * data["current"]
-            if shares < 100:
-                continue
-        
+
+        # 市场状态调整
+        if not _regime_allows(market_regime, tech_score):
+            continue
+        # 牛市可降低要求：评分达标即通过（无额外门槛）
+
+        sizing = _resolve_shares(data, cash, total_capital)
+        if sizing is None:
+            continue
+        shares, position_value = sizing
+
         candidates.append({
             "code": code,
             "name": data["name"],
@@ -380,7 +425,7 @@ def advanced_filter(realtime_data, portfolio_positions, cash, total_capital):
             "shares": shares,
             "position_value": position_value
         })
-    
+
     candidates.sort(key=lambda x: (-x["tech_score"], -x["change_pct"]))
     return candidates
 
