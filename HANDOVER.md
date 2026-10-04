@@ -1256,3 +1256,45 @@ web_dashboard / core.scheduler）、pytest tests/ -q 56 passed。
 run_virtual_v4.py 从“零测试覆盖”变成撤价计算逻辑有 18 个用例守着，
 下次要拆它已经有安全网了。
 
+
+
+## 二十二、有了测试后拆 run_virtual_v4：绩效与下单价位抽出（2026-10-05）
+
+第十九节说这个文件零测试覆盖所以不拆，第二十一节把覆盖补到 18 个用例，
+这一节就把当初“不敢动”的部分拆了。
+
+### 22.1 绩效指标抽出（9c593cf）
+
+calculate_performance_metrics 原本在 run_virtual_v4.py 里内联 70 行，
+且**重复实现了最大回撤和夏普**（第十九节刚把另外两份合并掉，这是漏网的第三份）。
+
+抽成 performance_metrics.py，并把 I/O 与计算分开：
+
+- read_total_values(history_dir)：只负责按 mtime 读 run_log_*.json 取净值，坏文件跳过；
+- compute_metrics(values)：纯函数，只吃净值序列吐指标dict，可直接单测。
+
+等价性验证：对 6 组净值序列（上涨/下跌/震荡/横盘/样本不足/含 0 值）与原内联实现
+逐字段比对，结果完全一致；抽出的版本额外不会在净值为 0 时崩。
+run_virtual_v4 里只剩 7 行委托，并对真实 history/ 目录实测跑通（21 笔日志）。
+
+### 22.2 下单止损止盈价抽出（de0bc08）
+
+execute_buy 里的价格档位计算是直接决定亏多少钱的部分，原来是三分支嵌套：
+ATR 成功 / analysis 无 atr / analysis 抛异常，且固定比例的写法重复出现了 3 次。
+
+抽成 order_levels.py：
+
+- resolve_levels(price, atr, ...)：ATR 有效走动态，缺失或为 0 或取数失败一律退回固定比例；
+- fixed_levels / atr_levels：两个原子计算，便于单独验算。
+
+等价性验证：5 个价格 x 5 种分支行为共 25 种组合逐值比对，与原实现完全一致，
+包括 atr=0 回退固定比例（原实现靠真值判断，行为相同）。
+
+### 22.3 数字
+
+run_virtual_v4.py：713 -> 648 行（两轮共减 65 行，且减掉的都是有测试守着的逻辑）。
+测试数：80 -> 107。
+
+剩下的 648 行是 wiring 与 I/O（run_once / main / execute_buy / execute_sell / advanced_filter），
+继续拆收益递减，且 execute_* 动到真实下单，要进一步拆得先给它们补集成级测试。
+
