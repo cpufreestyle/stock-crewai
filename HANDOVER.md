@@ -1594,3 +1594,55 @@ dependabot.yml 经 yaml.safe_load 解析通过、5 条规则符合预期；
 wiki/ 已不存在，wiki-sync.yml 的 mkdir -p wiki 保证其仍可自愈；
 compileall 干净、125 测试全过、工作树干净。
 
+
+
+## 二十九、上一轮遗留改动定性（2026-10-05）
+
+### 29.1 _pth.txt：pytest 报告误重定向的产物（已删）
+
+上一轮结束时工作树里有一个未跟踪的 835 字节 _pth.txt。逐字看过，
+内容是 125 passed, 22 warnings in 54.51s 的 pytest 终端报告——
+没有任何用户数据，也没有 .pth 路径文件该有的内容。
+创建时间 21:34，早于 .venv 的 22:54，可确定是上一轮把 pytest 输出
+重定向时写错了目标文件名；文件名看着像 Python 的 .pth 机制才显得可疑。
+纯噪音，已删除。
+
+### 29.2 .gitignore 的 .venv/ 一行：该留，且这个 venv 现在是主力
+
+.gitignore 新增的 .venv/ 对应仓库根这个目录，创建时间 22:54、
+紧随 22:55 的 .gitignore 修改，两者是同一轮操作。
+原以为只是装 black 的临时环境，实际装了约 300 个包，
+含 crewai 1.15.23 / pytest 9.1.1 / pandas 3.0.6 / flask / akshare 等完整依赖。
+
+它是当前沙箱外唯一顺畅可用的 Python：系统 Python312 在沙箱里启动即
+拒绝访问（提权后可启动），本 venv 提权后一切正常。
+本节的 lint 统计与 125 passed 基线都由它产出，已用 check-ignore -v
+确认 .venv/Scripts/python.exe 命中第 9 行规则、_quarantine/ 命中第 92 行。
+
+所以 .venv/ 下一节若决定统一用这个 venv 跑验证，它就不再是临时物。
+
+### 29.3 CI lint 硬化的成本（28.3 的数字补齐）
+
+用本 venv 的 black 26.5.1 / isort 9.0.2 / flake8 7.4.1 实测：
+
+- `black --check .`：**74 个文件**需要重排，diff 上万行量级，
+  绝大多数是模块 docstring 后空一行、长 f-string 折行、列表字面量展开
+  ——纯风格噪音，但会让整个仓库的 git blame 全部翻页。
+- `isort --check-only .`：12 个文件报 ERROR（import 分组与空行不合规），
+  且对 crew.py / dry_run_offline.py 等 8 个文件直接 Unable to parse
+  （print 里的 emoji 触发 gbk codec 报错），说明 isort 在 GBK 终端下不可用。
+- `flake8 --max-line-length=120`：多次尝试均无稳定输出（退出码与文本都拿不到），
+  不能作为门禁依据。
+
+结论与 28.3 一致且更硬：**不宜硬化为 push 门禁**。真要管，只对
+git diff 触及的文件跑 `black --check` 才是低成本门禁，但这属于
+CI 行为变更，需单独确认后再动。
+
+### 29.4 基线复核（本 venv）
+
+`pytest tests/ -q`：125 passed, 22 warnings in 28.21s（系统 Python 为 54.51s）。
+`compileall` 源码目录与根目录 .py：干净（注意必须排除 `.venv/`，
+否则 venv 自带的 crewai_cli 模板 {{folder_name}}/tool.py 会报 SyntaxError，
+那是包内的 Jinja 模板，不是本仓库问题）。
+
+工作树现在只剩打算提交的 `.gitignore` 一行改动。
