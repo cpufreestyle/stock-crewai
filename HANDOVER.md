@@ -2227,3 +2227,72 @@ signal = _judge_signal(score)
   `signal_detail` 文案逐字保留。
 - `_score_volume` 是唯一改了「返回形状」的新函数，因为 `volume_ratio` 需要那两个值；
   这是把原先藏着的中间结果显式化，不改外部可观测行为。
+
+## 40. 拆分 agents/trader.py run() 为决策/计划/执行/通知四层
+
+### 40.1 变更 lineage
+
+- `agents/trader.py`：162 行 → 193 行（+31，全部为 docstring 与空行）
+- `TraderAgent.run()`：119 行 → 46 行（只保留主流程编排）
+- 新增 5 个 helper：`_hold` / `_new_trade_plan`（静态）/ `_execute_buys` / `_buy_one` / `_notify_buy`
+
+### 40.2 拆分原则
+
+- `run()` 只保留「读状态 → 早退 → 调工具 → 写状态 → 组装 AgentOutput」的编排骨架。
+- 每个 helper 单一职责：
+  - `_hold(regime)`：市场不宜交易时的 HOLD 输出（原 `if not should_trade` 分支）
+  - `_new_trade_plan(regime, position_pct)`：交易计划骨架，无副作用，故可静态
+  - `_execute_buys(passed_picks, trade_plan)`：风控通过标的的遍历与参数解析
+  - `_buy_one(...)`：单笔买入的下单 / 止损止盈 / 记账 / 通知编排
+  - `_notify_buy(...)`：微信 + 看板两条通知的拼装与发送
+- `try/except` 边界保持在 `run()` 内，helper 内不再重复捕获，异常语义与旧版一致。
+
+### 40.3 等价性验证（20 场景）
+
+方法：`git show HEAD~1:agents/trader.py` 导出版本 A，当前工作区为版本 B，用
+`importlib.util.spec_from_file_location` 双加载，stub `state` + fake `call_tool`
+（签名 `def fake(tool_name, **kw)`），对比 `dataclasses.asdict(AgentOutput)` 全字段 JSON
+与工具调用序列（工具名 + kwargs 字典全等）。
+
+| 场景 | 结果 |
+|---|---|
+| 无风控评估数据（`risk_assessment` 为空） | PASS |
+| `should_trade=False` → HOLD 路径 | PASS |
+| `passed_picks` 为空列表 | PASS |
+| 单标的买入成功（含止损止盈 + 双通知） | PASS |
+| 单标的 `shares<=0` 跳过 | PASS |
+| 单标的 `price<=0` 跳过 | PASS |
+| 多标的（3 只）全部成交 | PASS |
+| 多标的第 2 只失败，后续继续 | PASS |
+| 买入返回 dict 且 `success=True` | PASS |
+| 买入返回 dict 且 `success=False`（有 error 字段） | PASS |
+| 买入返回 dict 且 `success=False`（无 error 字段） | PASS |
+| 买入返回非 dict（字符串 / None） | PASS |
+| 买入返回 JSON 字符串（`isinstance str` 分支） | PASS |
+| `pick` 缺 `score` / `rationale` / `stop_loss` / `take_profit` 字段 | PASS |
+| `ALLOW_AGENT_TRADING=0` 闸门路径（下单被拒） | PASS |
+| `ALLOW_AGENT_TRADING=1` 闸门放行 | PASS |
+| `regime` 为自定义字符串 | PASS |
+| `position_pct` 为浮点 | PASS |
+| 异常路径（`get_market_state` 抛错） | PASS |
+| `set_stop_loss` / `wechat_notify` / `dashboard_notify` 抛错 | PASS |
+| 合计 20/20 逐字段一致 | PASS |
+
+工具调用序列全等覆盖 `view_portfolio` / `execute_buy` / `set_stop_loss` / `wechat_notify` /
+`dashboard_notify` 五类，含调用次数与参数。
+
+### 40.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `python -m compileall -q agents tests tools core workflows <根目录 *.py>` | CE=0 |
+| `pytest tests/ -q` | 125 passed |
+
+### 40.5 说明
+
+- 语义零变化：买入 / 跳过判据（`shares<=0 or price<=0`）、`success` 判定、通知文案
+  （含 `{:.2f}` 格式化）、`trade_plan` 与 `trades` 的字段与键序全部逐字保留。
+- `_new_trade_plan` 标为 `@staticmethod`，因为旧版该段不访问 `self`；这是可见性收窄，
+  不影响调用方（只经 `run()` 内部调用）。
+- 与 38 节 `risk_manager_agent` 同一模式：早退分支 → 输出型 helper，主流程 → 编排。
+
