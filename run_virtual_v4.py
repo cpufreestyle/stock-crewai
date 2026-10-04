@@ -29,6 +29,7 @@ import data_fetcher as df
 import logging
 from logging.handlers import RotatingFileHandler
 
+from order_levels import resolve_levels
 from config import (
     MAX_POSITIONS, MAX_POSITION_RATIO, SINGLE_POSITION_RATIO,
     STOP_LOSS_RATIO, TAKE_PROFIT_RATIO, ATR_STOP_MULTIPLIER, ATR_PROFIT_MULTIPLIER,
@@ -416,24 +417,20 @@ def execute_buy(candidates, portfolio_positions, cash, total_capital, realtime_d
         if price <= 0:
             continue
         
-        # 计算动态止损止盈
+        # 计算动态止损止盈：ATR 有效走动态，否则（含取数失败）退回固定比例
+        atr = None
         if TECH_AVAILABLE:
             try:
                 analysis = ti.analyze_stock(cand["code"])
-                if "error" not in analysis and analysis.get("atr"):
-                    # ATR止损
-                    atr = analysis["atr"]
-                    stop_loss = round(price - ATR_STOP_MULTIPLIER * atr, 2)
-                    take_profit = round(price + ATR_PROFIT_MULTIPLIER * atr, 2)
-                else:
-                    stop_loss = round(price * STOP_LOSS_RATIO, 2)
-                    take_profit = round(price * TAKE_PROFIT_RATIO, 2)
-            except:
-                stop_loss = round(price * STOP_LOSS_RATIO, 2)
-                take_profit = round(price * TAKE_PROFIT_RATIO, 2)
-        else:
-            stop_loss = round(price * STOP_LOSS_RATIO, 2)
-            take_profit = round(price * TAKE_PROFIT_RATIO, 2)
+                if "error" not in analysis:
+                    atr = analysis.get("atr")
+            except Exception:
+                atr = None
+        stop_loss, take_profit = resolve_levels(
+            price, atr,
+            STOP_LOSS_RATIO, TAKE_PROFIT_RATIO,
+            ATR_STOP_MULTIPLIER, ATR_PROFIT_MULTIPLIER,
+        )
         
         result = pt.update_position(
             stock_code=cand["code"],
