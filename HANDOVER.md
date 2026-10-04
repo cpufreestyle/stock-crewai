@@ -1898,4 +1898,59 @@ powershell 命令行里的 `codex` 判断进程，在本机已无意义。继续
 - `crew.py` 已无 100 行以上函数；下一批目标是 `backtest.py`（218/161 行两函数）
   与 `core/orchestrator.py`（285 行 Orchestrator 类）
 
+## 三十五、拆分 backtest.py 两个超长函数（2026-10-05）
+
+### 35.1 背景
+
+`backtest.py` 只有两个函数，却分别是 218 行与 161 行，是全仓库剩余最大的单函数。
+`backtest_strategy` 把「按日循环」整段摊开：取行情、查止损止盈、查买入信号、
+算当日市值、算指标、打印报告、落盘 JSON 全部内联在同一层缩进里。
+`multi_strategy_backtest` 里均线与 RSI 两段几乎逐行同构（cash/shares/position/
+values/trades/entry 六个变量 + 同一个循环骨架），复制粘贴痕迹明显。
+
+前者只被本文件的 `__main__` 调用；后者被 `agents/backtest_agent.py`、`crew.py`、
+`tools/stock_tools.py`、`web_dashboard.py` 四处共用，是回测能力的实际入口。
+
+### 35.2 拆分方案
+
+`backtest_strategy`（218 → 94 行）抽出：
+
+- `_trading_dates(start_date, end_date)` — 工作日列表
+- `_fetch_daily_prices(date, stock_pool)` — 当日行情（当前为占位实现）
+- `_check_exit_signals(...)` — 止损 0.92 / 止盈 1.20 平仓
+- `_check_entry_signals(...)` — 涨幅 0~8% 买入信号
+- `_daily_value(capital, positions, daily_prices)` — 当日总资产
+- `_compute_metrics(...)` — 总收益/最大回撤/胜率/夏普
+- `_save_backtest_result(result, strategy_name)` — 落盘 history/*.json
+
+`multi_strategy_backtest`（161 → 102 行）抽出：
+
+- `_ma_strategy(price_data, ma5, ma20)` — 均线策略回测
+- `_rsi_strategy(price_data, rsi)` — RSI 策略回测
+- `_compute_rsi(price_data)` — 14 日 RSI 序列
+
+两处行为等价性注意点：
+
+- `_check_exit_signals` 把原先 `if 止损 / elif 止盈` 两个大分支合并为
+  `if 未触发: continue` + 单一平仓块，`reason` 由条件推导；平仓金额、
+  手续费、滑点、pnl 计算完全一致。
+- `_check_entry_signals` 由「遍历 stock_pool」改为「遍历 daily_prices」——
+  两者键集合相同（`_fetch_daily_prices` 失败时不写入该键，等价于原先
+  `if code not in daily_prices: continue`）。
+- 均线/RSI 两个策略的初始 `values` 填充长度（20 / 14 天）与循环起点保持原样，
+  权益曲线长度不变，`calculate_max_drawdown` 输入一致。
+
+### 35.3 验证证据
+
+- `py_compile backtest.py`：CE=0
+- `compileall -q agents tests tools core workflows <根目录 .py>`：CE=0
+- `pytest tests/ -q`：125 passed, 22 warnings（无回归）
+- `backtest_strategy` 218 → 94 行；`multi_strategy_backtest` 161 → 102 行；
+  `backtest.py` 405 → 460 行
+
+### 35.4 剩余候选
+
+- `core/orchestrator.py` 的 `Orchestrator` 类 285 行（下一目标）
+- `web_dashboard.py` 459 行（多为路由与内联 HTML，需先确认是否有单函数超标）
+
 
