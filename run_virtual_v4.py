@@ -477,75 +477,12 @@ def execute_buy(candidates, portfolio_positions, cash, total_capital, realtime_d
 
 # ========== 绩效计算 ==========
 def calculate_performance_metrics():
-    """计算绩效指标（夏普比率、最大回撤等）"""
+    """计算绩效指标（实现已抽到 performance_metrics.py，此处只负责定位日志目录）"""
+    from performance_metrics import read_total_values, compute_metrics
     history_dir = Path(__file__).parent / "history"
-    
-    # 读取最近30天的日志
-    log_files = sorted(history_dir.glob("run_log_*.json"), key=lambda f: f.stat().st_mtime)[-720:]  # 约30天
-    
-    if len(log_files) < 10:
-        return None
-    
-    values = []
-    for f in log_files:
-        try:
-            with open(f, "r", encoding="utf-8") as fp:
-                data = json.load(fp)
-                values.append(data.get("portfolio", {}).get("total_value", 0))
-        except:
-            continue
-    
-    if len(values) < 10:
-        return None
-    
-    # 计算收益率序列
-    returns = []
-    for i in range(1, len(values)):
-        if values[i-1] > 0:
-            ret = (values[i] - values[i-1]) / values[i-1]
-            returns.append(ret)
-    
-    if not returns:
-        return None
-    
-    # 计算指标
-    mean_ret = sum(returns) / len(returns) * 100  # 转换为百分比
-    std_ret = (sum((r*100 - mean_ret) ** 2 for r in returns) / (len(returns) - 1)) ** 0.5
-    
-    # 年化收益（每天6次采样，假设交易时段）
-    annual_ret = mean_ret * 252 * 6
-    annual_std = std_ret * (252 * 6) ** 0.5
-    
-    # 夏普比率（假设无风险利率3%）
-    risk_free = 3.0
-    sharpe = (annual_ret - risk_free) / annual_std if annual_std > 0 else 0
-    
-    # 最大回撤
-    peak = values[0]
-    max_dd = 0
-    for v in values:
-        if v > peak:
-            peak = v
-        dd = (peak - v) / peak * 100
-        if dd > max_dd:
-            max_dd = dd
-    
-    # 胜率
-    win_count = sum(1 for r in returns if r > 0)
-    win_rate = win_count / len(returns) * 100 if returns else 0
-    
-    return {
-        "sharpe_ratio": round(sharpe, 2),
-        "max_drawdown": round(max_dd, 2),
-        "annual_return": round(annual_ret, 2),
-        "annual_volatility": round(annual_std, 2),
-        "win_rate": round(win_rate, 1),
-        "total_days": len(values),
-        "avg_return_per_trade": round(mean_ret, 4)
-    }
+    history_dir.mkdir(exist_ok=True)
+    return compute_metrics(read_total_values(history_dir))
 
-
-# ========== 主运行函数 ==========
 def run_once():
     """单次运行"""
     print("\n" + "=" * 60)
