@@ -2148,3 +2148,82 @@ MIN_BUY_SHARES = 100       # A 股最小买入单位（一手）
 - `agents/portfolio_rebalancer.py:35 run` 115 行
 - `run_virtual_v4.py:273 advanced_filter` 113 行
 - `data_sources/market.py:50 get_market_regime` 111 行
+
+---
+
+## 39. 拆分 technical_indicators.analyze_stock 为七组信号函数
+
+### 39.1 动机
+
+`technical_indicators.py:185 analyze_stock()` 127 行，是 `run_virtual_v4.py:327` / `:430` 与
+`tools/stock_tools.py:115` 共用的技术面入口。它做了四件事：拉 K 线、算指标、逐组打分、
+组装返回。其中「逐组打分」占了 213-275 行共 60 余行，6 组规则全部以 `if ... score += n`
+内联展开，改一条规则要通读全函数。
+
+### 39.2 改动
+
+文件 330 → 365 行。`analyze_stock()` 127 → 55 行，只保留：拉数据 → 算指标 → 依次调用
+打分函数 → 判定信号 → 组装返回。
+
+拆出的 7 个新函数（均为模块级私有语义，无对外契约变化）：
+
+| 函数 | 职责 | 原信号 |
+| --- | --- | --- |
+| `_score_ma_trend` | MA 趋势 | 多头 +3 / 空头 -3 / 短期过长期 +1 |
+| `_score_macd` | MACD | 金叉 +2 / 死叉 -2 |
+| `_score_rsi` | RSI | 超买 -1 / 超卖 +2 / 中性 +1 |
+| `_score_bollinger` | 布林带 | 触下轨 +2 / 触上轨 -1 / 中轨上方 +1 |
+| `_score_kdj` | KDJ | 超买 -1 / 超卖 +1 / 金叉 +1 |
+| `_score_volume` | 成交量确认 | 放量 +1，另返回 `recent_vol` / `avg_vol` |
+| `_judge_signal` | 总分映射 | STRONG_BUY / BUY / SELL / WEAK_SELL / NEUTRAL |
+
+打分函数统一签名 `(指标值..., score, detail) -> (score, detail)`，把原先的
+「就地改 `score` / 就地 `append`」改成显式返回，顺序调用即可复现原累加顺序：
+
+```
+score, signal_detail = _score_ma_trend(ma5, ma10, ma20, score, signal_detail)
+score, signal_detail = _score_macd(dif, dea, macd_hist, score, signal_detail)
+score, signal_detail = _score_rsi(rsi, score, signal_detail)
+score, signal_detail = _score_bollinger(current, upper, middle, lower, score, signal_detail)
+score, signal_detail = _score_kdj(k_val, d_val, score, signal_detail)
+score, signal_detail, recent_vol, avg_vol = _score_volume(klines, score, signal_detail)
+signal = _judge_signal(score)
+```
+
+`_score_volume` 额外回传 `recent_vol` / `avg_vol`，供返回字段 `volume_ratio` 使用
+（原先这两个值只活在函数体内，不能被复用）。
+
+### 39.3 验证证据
+
+- `py_compile technical_indicators.py`：CE=0
+- `compileall -q agents tests tools core workflows <根目录 .py>`：CE=0
+- `pytest tests/ -q`：125 passed, 22 warnings（无回归）
+- **等价性实测**：旧版（`git show HEAD`）与新版同输入分别驱动 `analyze_stock`，
+  比对完整返回 dict（`sort_keys` 后 JSON 全等），13/13 场景一致：
+
+| 场景 | score | signal |
+| --- | --- | --- |
+| 19 根（数据不足，早退） | None | NEUTRAL |
+| 20 根 | 4 | BUY |
+| 60 根常规 | -1 | WEAK_SELL |
+| 200 根长样本 | 4 | BUY |
+| baseline=1000 高价股 | 5 | STRONG_BUY |
+| baseline=2 低价股 | 3 | BUY |
+| 严格上涨 | 4 | BUY |
+| 严格下跌 | -3 | SELL |
+| 完全横盘 | -1 | WEAK_SELL |
+| 恒定放量 | 4 | BUY |
+| 无 volume 字段（触发异常路径） | None | None |
+| 末量巨大放量 | 0 | NEUTRAL |
+| 空 K 线（数据不足） | None | NEUTRAL |
+
+覆盖到的分支：5 种信号分档全命中、`len(klines) < 20` 早退、MA/MACD/RSI/BOLL/KDJ
+各自的 if 真值与假值、`avg_vol == 0` 的除零保护、`volume` 缺失致 `TypeError` 的异常路径
+（旧版同样抛错，行为一致）。
+
+### 39.4 说明
+
+- 语义零变化：所有阈值（2:1、70/30/40-60、80/20、1.5 倍、5/2/-3/-1 分档线）与
+  `signal_detail` 文案逐字保留。
+- `_score_volume` 是唯一改了「返回形状」的新函数，因为 `volume_ratio` 需要那两个值；
+  这是把原先藏着的中间结果显式化，不改外部可观测行为。

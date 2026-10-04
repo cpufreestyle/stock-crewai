@@ -182,110 +182,144 @@ def calculate_atr(highs: List[float], lows: List[float], closes: List[float], pe
     return round(sum(trs[-period:]) / period, 4)
 
 
+
+def _score_ma_trend(ma5, ma10, ma20, score, detail):
+    """MA 趋势信号：多头排列 +3 / 空头排列 -3 / 短期在长期线上 +1"""
+    if not (ma5 and ma10 and ma20):
+        return score, detail
+    if ma5 > ma10 > ma20:
+        detail.append("MA多头排列(+3)")
+        return score + 3, detail
+    if ma5 < ma10 < ma20:
+        detail.append("MA空头排列(-3)")
+        return score - 3, detail
+    if ma5 > ma20:
+        detail.append("短期在长期线上(+1)")
+        return score + 1, detail
+    return score, detail
+
+
+def _score_macd(dif, dea, macd_hist, score, detail):
+    """MACD 信号：金叉 +2 / 死叉 -2"""
+    if not (dif and dea):
+        return score, detail
+    if dif > dea and macd_hist and macd_hist > 0:
+        detail.append("MACD金叉(+2)")
+        return score + 2, detail
+    if dif < dea:
+        detail.append("MACD死叉(-2)")
+        return score - 2, detail
+    return score, detail
+
+
+def _score_rsi(rsi, score, detail):
+    """RSI 信号：超买 -1 / 超卖 +2 / 中性 +1"""
+    if not rsi:
+        return score, detail
+    if rsi > 70:
+        detail.append(f"RSI超买({rsi})")
+        return score - 1, detail
+    if rsi < 30:
+        detail.append(f"RSI超卖({rsi})")
+        return score + 2, detail
+    if 40 <= rsi <= 60:
+        detail.append(f"RSI中性({rsi})")
+        return score + 1, detail
+    return score, detail
+
+
+def _score_bollinger(current, upper, middle, lower, score, detail):
+    """布林带信号：触下轨 +2 / 触上轨 -1 / 中轨上方 +1"""
+    if not (upper and middle and lower):
+        return score, detail
+    if current < lower:
+        detail.append("价格触及布林下轨(+2)")
+        return score + 2, detail
+    if current > upper:
+        detail.append("价格触及布林上轨(-1)")
+        return score - 1, detail
+    if current > middle:
+        detail.append("价格在布林中轨上方(+1)")
+        return score + 1, detail
+    return score, detail
+
+
+def _score_kdj(k_val, d_val, score, detail):
+    """KDJ 信号：超买区 -1 / 超卖区 +1 / 金叉 +1"""
+    if not (k_val and d_val):
+        return score, detail
+    if k_val > 80 and d_val > 80:
+        detail.append("KDJ超买区域(-1)")
+        return score - 1, detail
+    if k_val < 20 and d_val < 20:
+        detail.append("KDJ超卖区域(+1)")
+        return score + 1, detail
+    if k_val > d_val:
+        detail.append("KDJ金叉(+1)")
+        return score + 1, detail
+    return score, detail
+
+
+def _score_volume(klines, score, detail):
+    """成交量确认：最新量 > 20 日均量 1.5 倍时 +1"""
+    recent_vol = klines[-1]["volume"] if klines else 0
+    avg_vol = sum(k["volume"] for k in klines[-20:]) / 20
+    if recent_vol > avg_vol * 1.5:
+        detail.append(f"放量确认(+1, 缩量{recent_vol/avg_vol:.1f}x)")
+        return score + 1, detail, recent_vol, avg_vol
+    return score, detail, recent_vol, avg_vol
+
+
+def _judge_signal(score):
+    """按总分映射交易信号"""
+    if score >= 5:
+        return "STRONG_BUY"
+    if score >= 2:
+        return "BUY"
+    if score <= -3:
+        return "SELL"
+    if score <= -1:
+        return "WEAK_SELL"
+    return "NEUTRAL"
+
+
 def analyze_stock(code: str) -> Dict:
     """综合分析单只股票的技术指标"""
     klines = get_history_kline(code, days=60)
-    
+
     if len(klines) < 20:
         return {"code": code, "error": "数据不足", "signal": "NEUTRAL"}
-    
+
     closes = [k["close"] for k in klines]
     highs = [k["high"] for k in klines]
     lows = [k["low"] for k in klines]
-    
+
     # 计算各项指标
     ma5 = calculate_ma(closes, 5)
     ma10 = calculate_ma(closes, 10)
     ma20 = calculate_ma(closes, 20)
-    
+
     dif, dea, macd_hist = calculate_macd(closes)
     rsi = calculate_rsi(closes)
     upper, middle, lower = calculate_bollinger(closes)
     k_val, d_val, j_val = calculate_kdj(highs, lows, closes)
     atr = calculate_atr(highs, lows, closes)
-    
+
     current = closes[-1]
-    
+
     # 生成信号
     score = 0
     signal_detail = []
-    
-    # MA趋势
-    if ma5 and ma10 and ma20:
-        if ma5 > ma10 > ma20:
-            score += 3
-            signal_detail.append("MA多头排列(+3)")
-        elif ma5 < ma10 < ma20:
-            score -= 3
-            signal_detail.append("MA空头排列(-3)")
-        elif ma5 > ma20:
-            score += 1
-            signal_detail.append("短期在长期线上(+1)")
-    
-    # MACD
-    if dif and dea:
-        if dif > dea and macd_hist and macd_hist > 0:
-            score += 2
-            signal_detail.append("MACD金叉(+2)")
-        elif dif < dea:
-            score -= 2
-            signal_detail.append("MACD死叉(-2)")
-    
-    # RSI
-    if rsi:
-        if rsi > 70:
-            score -= 1
-            signal_detail.append(f"RSI超买({rsi})")
-        elif rsi < 30:
-            score += 2
-            signal_detail.append(f"RSI超卖({rsi})")
-        elif 40 <= rsi <= 60:
-            score += 1
-            signal_detail.append(f"RSI中性({rsi})")
-    
-    # 布林带
-    if upper and middle and lower:
-        if current < lower:
-            score += 2
-            signal_detail.append("价格触及布林下轨(+2)")
-        elif current > upper:
-            score -= 1
-            signal_detail.append("价格触及布林上轨(-1)")
-        elif current > middle:
-            score += 1
-            signal_detail.append("价格在布林中轨上方(+1)")
-    
-    # KDJ
-    if k_val and d_val:
-        if k_val > 80 and d_val > 80:
-            score -= 1
-            signal_detail.append("KDJ超买区域(-1)")
-        elif k_val < 20 and d_val < 20:
-            score += 1
-            signal_detail.append("KDJ超卖区域(+1)")
-        elif k_val > d_val:
-            score += 1
-            signal_detail.append("KDJ金叉(+1)")
-    
-    # 成交量确认
-    recent_vol = klines[-1]["volume"] if klines else 0
-    avg_vol = sum(k["volume"] for k in klines[-20:]) / 20
-    if recent_vol > avg_vol * 1.5:
-        score += 1
-        signal_detail.append(f"放量确认(+1, 缩量{recent_vol/avg_vol:.1f}x)")
-    
-    # 信号判定
-    if score >= 5:
-        signal = "STRONG_BUY"
-    elif score >= 2:
-        signal = "BUY"
-    elif score <= -3:
-        signal = "SELL"
-    elif score <= -1:
-        signal = "WEAK_SELL"
-    else:
-        signal = "NEUTRAL"
-    
+
+    score, signal_detail = _score_ma_trend(ma5, ma10, ma20, score, signal_detail)
+    score, signal_detail = _score_macd(dif, dea, macd_hist, score, signal_detail)
+    score, signal_detail = _score_rsi(rsi, score, signal_detail)
+    score, signal_detail = _score_bollinger(current, upper, middle, lower, score, signal_detail)
+    score, signal_detail = _score_kdj(k_val, d_val, score, signal_detail)
+    score, signal_detail, recent_vol, avg_vol = _score_volume(klines, score, signal_detail)
+
+    signal = _judge_signal(score)
+
     return {
         "code": code,
         "name": klines[-1].get("name", ""),
@@ -309,6 +343,7 @@ def analyze_stock(code: str) -> Dict:
         "signal_detail": signal_detail,
         "volume_ratio": round(recent_vol / avg_vol, 2) if avg_vol > 0 else 0
     }
+
 
 
 if __name__ == "__main__":
