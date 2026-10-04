@@ -7,7 +7,6 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import json
-from typing import Type, Optional
 from pydantic import BaseModel, Field
 from tools.compat import BaseTool
 

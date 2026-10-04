@@ -17,7 +17,7 @@ from tasks import (
     create_backtest_task,
     create_rebalance_task,
 )
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 import data_fetcher as df
 import portfolio_tracker as pt
 from tools.stock_tools import FundamentalAnalysisTool

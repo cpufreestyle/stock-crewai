@@ -18,9 +18,7 @@ sys.stderr.reconfigure(encoding='utf-8')
 from dotenv import load_dotenv
 load_dotenv()
 
-import requests
 import json
-import re
 import os
 import time
 import socket
@@ -36,9 +34,8 @@ from logging.handlers import RotatingFileHandler
 from config import (
     MAX_POSITIONS, MAX_POSITION_RATIO, SINGLE_POSITION_RATIO,
     STOP_LOSS_RATIO, TAKE_PROFIT_RATIO, ATR_STOP_MULTIPLIER, ATR_PROFIT_MULTIPLIER,
-    ATR_HOLDING_DAYS, MIN_CHANGE_PCT, MAX_CHANGE_PCT,
-    GOOD_CHANGE_LOW, GOOD_CHANGE_HIGH, MIN_TECH_SCORE,
-    NEAR_TAKE_PROFIT_PCT, ATR_STOP_LOSS_ENABLED,
+    MIN_CHANGE_PCT, MAX_CHANGE_PCT,
+    GOOD_CHANGE_LOW, GOOD_CHANGE_HIGH,
     LOG_MAX_BYTES, LOG_BACKUP_COUNT, NET_VALUE_HISTORY_FILE,
 )
 
