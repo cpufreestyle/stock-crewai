@@ -2620,3 +2620,85 @@ RSI/MACD/BOLL 三项增强各自的真假值、熊市/牛市门槛、现金约�
 - `price_data` 仍作为 `_assemble_strategy_report` 的入参（虽然内部只用 `runs`），
   是为保持与旧版一致的调用形态，后续若再拆分可去掉。
 
+
+
+## 45. 拆分 backtest.backtest_strategy 为按日循环/报告打印两段
+
+### 45.1 变更 lineage
+
+- `backtest.py`：464 → 505 行（+41，全部为 docstring、空行与签名换行）
+- `backtest_strategy()`：94 行 → 61 行（只保留编排骨架）
+- 新增 2 个模块级 helper（紧接 `_save_backtest_result` 之后）：
+  `_run_daily_backtest` / `_print_backtest_report`
+
+### 45.2 拆分原则
+
+- `backtest_strategy()` 只保留「打印头 → 跑按日循环 → 算指标 → 组装 result → 打印报告 → 保存」
+  六步编排；`print` 输出的顺序与文案逐字未变（表格见 45.3）。
+- helper 单一职责：
+  - `_run_daily_backtest(stock_pool, start_date, end_date, initial_capital, commission, slippage)`：
+    初始化 `capital` / `positions` / `trades` / `daily_values`，生成交易日列表，
+    按日调用已有的 `_check_exit_signals` / `_check_entry_signals` / `_daily_value`，
+    返回 `(daily_values, trades)` 二元组
+  - `_print_backtest_report(initial_capital, final_value, total_return, max_dd, sharpe, trades, win_rate)`：
+    打印回测结果摘要，无返回值
+- 拆出的两段恰好是原函数中「已有 helper 调用密集」与「纯 print」两块，
+  `backtest_strategy` 自身不再持有循环体和 7 条 print。
+- 参数与返回值签名全部显式化，不再依赖闭包捕获（原函数内变量共 8 个，
+  拆分后通过入参和返回值传递）。
+
+### 45.3 等价性验证（18 场景）
+
+方法：`git show HEAD:backtest.py` 导出版本 A，当前工作区为版本 B，
+`importlib.util.spec_from_file_location` 双加载，stub `datetime` 为
+`FakeDT(datetime.datetime)` 且 `now()` 固定返回 2024-01-02 12:00:00，
+stub `_save_backtest_result` 为返回固定路径的桩（避免写 `history/` 目录），
+对比三项全等：返回值 JSON（`sort_keys=True`）、`contextlib.redirect_stdout`
+捕获的完整 stdout 字符串、异常路径的 `(类型, 消息)`。
+
+| 场景 | 结果 |
+|---|---|
+| 5 个自然日（跨周末） | PASS |
+| 25 个自然日 | PASS |
+| 单日回测 | PASS |
+| 纯周末区间（`date_list` 为空） | PASS |
+| 60 个自然日 | PASS |
+| 空股票池 | PASS |
+| 单只股票池 | PASS |
+| 10 只股票池 | PASS |
+| 初始资金 5000（低于 20000 买入门槛） | PASS |
+| 初始资金 1e7 | PASS |
+| 手续费与滑点均为 0 | PASS |
+| 高手续费 0.05 + 高滑点 0.02 | PASS |
+| 起止日期倒置（返回空回测） | PASS |
+| 2025 闰年区间 | PASS |
+| 策略名含空格 | PASS |
+| 120 个自然日 | PASS |
+| 非法日期格式（`2024/01/01`）→ `strptime` 抛错路径 | PASS |
+| 跨 2024-02-29 闰日区间 | PASS |
+| 合计 18/18 三项全等 | PASS |
+
+覆盖到的分支：交易日为空 / 非空 / 跨闰日、资金低于买入门槛与充足、手续费/滑点为零与非零、
+多规模股票池、非法日期抛错路径、进度打印的 `i % 20 == 0` 分支（120 日场景触发 6 次）。
+
+### 45.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `python -m compileall -q backtest.py` | CE=0 |
+| `pytest tests/ -q` | 125 passed |
+
+### 45.5 说明
+
+- 语义零变化：`capital` / `positions` / `trades` / `daily_values` 的初始化、
+  `0.92` 止损与 `1.20` 止盈阈值（在既有 helper 中，本次未触碰）、`20%` 仓位与整百股
+  取整、`i % 20 == 0` 的进度打印节奏、报告的 7 行 `print` 文案与 `result` 的全部 12 个字段
+  全部逐字保留。
+- `_run_daily_backtest` 返回二元组而非 dict，是为了让 `backtest_strategy` 里的
+  `daily_values, trades = ...` 一眼对应旧版的两个变量，等价性对比也因此更直接。
+- 等价性脚本首版用了不含 `strptime` 的 `FakeDT`，导致 `_trading_dates` 报
+  `AttributeError`；改为继承 `datetime.datetime` 后 18/18 通过 —— 又一次印证
+  桩必须提供被测代码真实调用的全部属性。
+- `backtest_strategy` 仍 61 行，其中 25 行是参数 docstring；有效逻辑已压到 36 行，
+  继续拆分的收益低于维护成本，暂到此为止。
+

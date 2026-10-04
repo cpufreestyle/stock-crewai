@@ -162,6 +162,63 @@ def _save_backtest_result(result: dict, strategy_name: str) -> str:
     return output_file
 
 
+def _run_daily_backtest(
+    stock_pool: list,
+    start_date: str,
+    end_date: str,
+    initial_capital: float,
+    commission: float,
+    slippage: float,
+) -> tuple:
+    """按日推进回测主循环，返回 (每日权益, 成交记录)。"""
+    capital = initial_capital
+    positions = {}  # {code: {"shares": int, "cost": float, "name": str}}
+    trades = []
+    daily_values = []
+
+    # 生成交易日列表
+    date_list = _trading_dates(start_date, end_date)
+    print(f"共 {len(date_list)} 个交易日\n")
+
+    # 按日回测
+    for i, date in enumerate(date_list):
+        if i % 20 == 0:
+            print(f"进度: {i}/{len(date_list)} ({i/len(date_list)*100:.1f}%)")
+
+        daily_prices = _fetch_daily_prices(date, stock_pool)
+        capital = _check_exit_signals(positions, daily_prices, date, capital, trades, commission, slippage)
+        capital = _check_entry_signals(positions, daily_prices, date, capital, initial_capital, trades, commission, slippage)
+
+        daily_values.append({
+            "date": date,
+            "value": _daily_value(capital, positions, daily_prices)
+        })
+
+    return daily_values, trades
+
+
+def _print_backtest_report(
+    initial_capital: float,
+    final_value: float,
+    total_return: float,
+    max_dd: float,
+    sharpe: float,
+    trades: list,
+    win_rate: float,
+) -> None:
+    """打印回测结果摘要。"""
+    print("\n" + "=" * 60)
+    print("  回测结果")
+    print("=" * 60)
+    print(f"\n初始资金: {initial_capital:,.2f}元")
+    print(f"最终资产: {final_value:,.2f}元")
+    print(f"总收益: {total_return:+.2f}%")
+    print(f"最大回撤: {max_dd:.2f}%")
+    print(f"夏普比率: {sharpe:.2f}")
+    print(f"交易次数: {len(trades)}")
+    print(f"胜率: {win_rate:.1f}%")
+
+
 def backtest_strategy(
     strategy_name: str,
     stock_pool: list,
@@ -192,31 +249,10 @@ def backtest_strategy(
     print(f"  初始资金: {initial_capital:,.2f}元")
     print("=" * 60 + "\n")
 
-    # 初始化
-    capital = initial_capital
-    positions = {}  # {code: {"shares": int, "cost": float, "name": str}}
-    trades = []
-    daily_values = []
+    daily_values, trades = _run_daily_backtest(
+        stock_pool, start_date, end_date, initial_capital, commission, slippage
+    )
 
-    # 生成交易日列表
-    date_list = _trading_dates(start_date, end_date)
-    print(f"共 {len(date_list)} 个交易日\n")
-
-    # 按日回测
-    for i, date in enumerate(date_list):
-        if i % 20 == 0:
-            print(f"进度: {i}/{len(date_list)} ({i/len(date_list)*100:.1f}%)")
-
-        daily_prices = _fetch_daily_prices(date, stock_pool)
-        capital = _check_exit_signals(positions, daily_prices, date, capital, trades, commission, slippage)
-        capital = _check_entry_signals(positions, daily_prices, date, capital, initial_capital, trades, commission, slippage)
-
-        daily_values.append({
-            "date": date,
-            "value": _daily_value(capital, positions, daily_prices)
-        })
-
-    # 计算回测指标
     metrics = _compute_metrics(daily_values, trades, initial_capital)
     final_value = metrics["final_value"]
     total_return = metrics["total_return"]
@@ -224,19 +260,6 @@ def backtest_strategy(
     win_rate = metrics["win_rate"]
     sharpe = metrics["sharpe"]
 
-    # 输出报告
-    print("\n" + "=" * 60)
-    print("  回测结果")
-    print("=" * 60)
-    print(f"\n初始资金: {initial_capital:,.2f}元")
-    print(f"最终资产: {final_value:,.2f}元")
-    print(f"总收益: {total_return:+.2f}%")
-    print(f"最大回撤: {max_dd:.2f}%")
-    print(f"夏普比率: {sharpe:.2f}")
-    print(f"交易次数: {len(trades)}")
-    print(f"胜率: {win_rate:.1f}%")
-
-    # 保存结果
     result = {
         "strategy": strategy_name,
         "start_date": start_date,
@@ -252,12 +275,11 @@ def backtest_strategy(
         "daily_values": daily_values
     }
 
+    _print_backtest_report(initial_capital, final_value, total_return, max_dd, sharpe, trades, win_rate)
     output_file = _save_backtest_result(result, strategy_name)
     print(f"\n结果已保存: {output_file}")
 
     return result
-
-
 
 
 def _ma_strategy(price_data, ma5, ma20) -> dict:
