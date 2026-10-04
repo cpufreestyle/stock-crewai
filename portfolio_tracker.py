@@ -111,6 +111,113 @@ def refresh_position_prices() -> Dict[str, float]:
     return price_map
 
 
+
+def _append_trade_log(stock_code: str, stock_name: str, action: str, price: float,
+                      shares: int, pnl: float, pnl_pct: float, reason: str):
+    """追加一条交易流水（买入也要记账）。"""
+    # 记录交易（买入也要记账：9/26 run6 发现 trades 文件 78 条全是 sell，
+    # 之前记录块嵌在 sell 分支里，所有买入在流水账里无痕）
+    ensure_dirs()
+    trade_log = os.path.join(HISTORY_DIR, f"trades_{datetime.now().strftime('%Y%m')}.json")
+    # 读-改-写整段进锁：Windows 上 os.replace 遇到别人正开句柄读旧文件会
+    # WinError 5 拒绝访问（实测 8 写并发 22/64 失败），读也必须持锁。
+    with _PORTFOLIO_LOCK:
+        trades = []
+        if os.path.exists(trade_log):
+            with open(trade_log, "r", encoding="utf-8") as f:
+                trades = json.load(f)
+        trades.append({
+            "date": datetime.now().isoformat(),
+            "code": stock_code,
+            "name": stock_name,
+            "action": action,
+            "price": price,
+            "shares": shares,
+            "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl_pct, 2),
+            "reason": reason
+        })
+        # 与 portfolio.json 同样的原子写：裸 open("w") 曾把 trades_202609.json
+        # 写成"合法数组 + 另一线程残片"，之后每次读都抛 UnicodeDecodeError，
+        # execute_sell 连续报错重试烧光 max_iter（9/26 run4 实测）。
+        tmp = trade_log + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(trades, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, trade_log)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
+
+
+def _apply_buy(portfolio: Dict, stock_code: str, stock_name: str,
+               price: float, shares: int):
+    """把一笔买入合进 portfolio（加仓按均价，新建按成本价），返回成本。"""
+    cost = price * shares
+    if cost > portfolio["cash"]:
+        return None
+
+    if stock_code in portfolio["positions"]:
+        pos = portfolio["positions"][stock_code]
+        total_shares = pos["shares"] + shares
+        avg_cost = (pos["avg_cost"] * pos["shares"] + price * shares) / total_shares
+        pos["shares"] = total_shares
+        pos["avg_cost"] = round(avg_cost, 2)
+    else:
+        portfolio["positions"][stock_code] = {
+            "name": stock_name,
+            "shares": shares,
+            "avg_cost": round(price, 2),
+            "last_price": round(price, 2),
+            "buy_date": datetime.now().strftime("%Y-%m-%d"),
+            "stop_loss": 0,
+            "take_profit": 0
+        }
+
+    portfolio["cash"] -= cost
+    return cost
+
+
+def _apply_sell(portfolio: Dict, stock_code: str, price: float, shares: int) -> tuple:
+    """把一笔卖出合进 portfolio（超额卖出按全卖处理），返回 (pnl, pnl_pct, 实际股数)。"""
+    if stock_code not in portfolio["positions"]:
+        return None
+
+    pos = portfolio["positions"][stock_code]
+    if shares > pos["shares"]:
+        shares = pos["shares"]
+
+    revenue = price * shares
+    pnl = (price - pos["avg_cost"]) * shares
+    pnl_pct = (price - pos["avg_cost"]) / pos["avg_cost"] * 100
+
+    pos["shares"] -= shares
+    if pos["shares"] <= 0:
+        del portfolio["positions"][stock_code]
+
+    portfolio["cash"] += revenue
+    return (pnl, pnl_pct, shares)
+
+
+def _recalc_totals(portfolio: Dict, current_prices: dict):
+    """按 现价 > last_price > avg_cost 取值链重算总资产与总收益率。"""
+    total_value = portfolio["cash"]
+    for code, pos in portfolio["positions"].items():
+        if current_prices and code in current_prices:
+            cp = current_prices[code]
+            pos["last_price"] = round(float(cp), 2)
+            pos["last_price_time"] = datetime.now().isoformat()
+        else:
+            cp = _position_last_price(pos)
+        total_value += cp * pos["shares"]
+
+    portfolio["total_value"] = round(total_value, 2)
+    portfolio["total_return_pct"] = round(
+        (total_value - portfolio["total_capital"]) / portfolio["total_capital"] * 100, 2
+    )
+
+
 def update_position(
     stock_code: str,
     stock_name: str,
@@ -127,102 +234,26 @@ def update_position(
     pnl_pct = 0.0
 
     if action == "buy":
-        cost = price * shares
-        if cost > portfolio["cash"]:
+        if _apply_buy(portfolio, stock_code, stock_name, price, shares) is None:
             return {"error": "资金不足"}
 
-        if stock_code in portfolio["positions"]:
-            pos = portfolio["positions"][stock_code]
-            total_shares = pos["shares"] + shares
-            avg_cost = (pos["avg_cost"] * pos["shares"] + price * shares) / total_shares
-            pos["shares"] = total_shares
-            pos["avg_cost"] = round(avg_cost, 2)
-        else:
-            portfolio["positions"][stock_code] = {
-                "name": stock_name,
-                "shares": shares,
-                "avg_cost": round(price, 2),
-                "last_price": round(price, 2),
-                "buy_date": datetime.now().strftime("%Y-%m-%d"),
-                "stop_loss": 0,
-                "take_profit": 0
-            }
-
-        portfolio["cash"] -= cost
-
     elif action == "sell":
-        if stock_code not in portfolio["positions"]:
+        sold = _apply_sell(portfolio, stock_code, price, shares)
+        if sold is None:
             return {"error": f"未持有 {stock_code}"}
+        pnl, pnl_pct, shares = sold
 
-        pos = portfolio["positions"][stock_code]
-        if shares > pos["shares"]:
-            shares = pos["shares"]
-
-        revenue = price * shares
-        pnl = (price - pos["avg_cost"]) * shares
-        pnl_pct = (price - pos["avg_cost"]) / pos["avg_cost"] * 100
-
-        pos["shares"] -= shares
-        if pos["shares"] <= 0:
-            del portfolio["positions"][stock_code]
-
-        portfolio["cash"] += revenue
-
-
-    # 记录交易（买入也要记账：9/26 run6 发现 trades 文件 78 条全是 sell，
-    # 之前记录块嵌在 sell 分支里，所有买入在流水账里无痑）
     if action in ("buy", "sell"):
-        ensure_dirs()
-        trade_log = os.path.join(HISTORY_DIR, f"trades_{datetime.now().strftime('%Y%m')}.json")
-        # 读-改-写整段进锁：Windows 上 os.replace 遇到别人正开句柄读旧文件会
-        # WinError 5 拒绝访问（实测 8 写并发 22/64 失败），读也必须持锁。
-        with _PORTFOLIO_LOCK:
-            trades = []
-            if os.path.exists(trade_log):
-                with open(trade_log, "r", encoding="utf-8") as f:
-                    trades = json.load(f)
-            trades.append({
-                "date": datetime.now().isoformat(),
-                "code": stock_code,
-                "name": stock_name,
-                "action": action,
-                "price": price,
-                "shares": shares,
-                "pnl": round(pnl, 2),
-                "pnl_pct": round(pnl_pct, 2),
-                "reason": reason
-            })
-            # 与 portfolio.json 同样的原子写：裸 open("w") 曾把 trades_202609.json
-            # 写成"合法数组 + 另一线程残片"，之后每次读都抛 UnicodeDecodeError，
-            # execute_sell 连续报错重试烧光 max_iter（9/26 run4 实测）。
-            tmp = trade_log + ".tmp"
-            try:
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(trades, f, ensure_ascii=False, indent=2)
-                os.replace(tmp, trade_log)
-            except BaseException:
-                if os.path.exists(tmp):
-                    os.remove(tmp)
-                raise
+        _append_trade_log(stock_code, stock_name, action, price, shares,
+                          pnl, pnl_pct, reason)
 
     # 计算总资产（现价取值链：current_prices > last_price > avg_cost）
-    total_value = portfolio["cash"]
-    for code, pos in portfolio["positions"].items():
-        if current_prices and code in current_prices:
-            cp = current_prices[code]
-            pos["last_price"] = round(float(cp), 2)
-            pos["last_price_time"] = datetime.now().isoformat()
-        else:
-            cp = _position_last_price(pos)
-        total_value += cp * pos["shares"]
-
-    portfolio["total_value"] = round(total_value, 2)
-    portfolio["total_return_pct"] = round(
-        (total_value - portfolio["total_capital"]) / portfolio["total_capital"] * 100, 2
-    )
+    _recalc_totals(portfolio, current_prices)
 
     save_portfolio(portfolio)
     return portfolio
+
+
 
 
 def set_stop_loss(stock_code: str, stop_loss: float, take_profit: float = 0):
@@ -374,3 +405,4 @@ def get_trade_history(month: str = None) -> List[Dict]:
 
 if __name__ == "__main__":
     print(get_portfolio_summary())
+

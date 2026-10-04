@@ -2001,4 +2001,54 @@ on_reject 的 retry/skip/abort 三分支。读一遍很难分清「哪层负责�
 - `core/agent_base.py` 216 行
 - `workflows/daily_analysis.py` 与 `crew.py` 的职责收敛（仍未拍板）
 
+## 三十七、拆分 portfolio_tracker.update_position()（2026-10-05）
+
+### 37.1 背景
+
+`portfolio_tracker.py:114 update_position()` 112 行，一个函数里塞了四件事：
+买入合仓、卖出平仓、写交易流水（含锁 + 原子写）、重算总资产。其中交易流水
+那段带着两条关键踩坑注释（Windows 持锁读改写、原子写防并发残片），埋在
+函数中部很容易在改买入逻辑时被误伤。
+
+该函数被 `tests/test_execute_orders.py` 与 `tests/test_stock_crewai.py` 直接钉住，
+是本仓库测试覆盖最好的资金路径之一，拆分后可直接验证。
+
+### 37.2 拆分方案
+
+`update_position()`（112 → 34 行）抽出：
+
+- `_apply_buy(portfolio, ...)` — 买入合仓，资金不足返回 `None`
+- `_apply_sell(portfolio, ...)` — 卖出平仓，未持有返回 `None`，超额卖出按全卖处理
+- `_append_trade_log(...)` — 交易流水（持锁读-改-写 + 原子写，保留原有踩坑注释）
+- `_recalc_totals(portfolio, current_prices)` — 总资产与总收益率重算
+
+返回契约未变：资金不足仍返回 `{"error": "资金不足"}`，未持有仍返回
+`{"error": f"未持有 {stock_code}"}`，成功仍返回整个 portfolio 字典。
+买入路径原先先算 `cost = price * shares` 再判资金，现在 `_apply_buy` 内部判定，
+对外行为一致（资金不足时 portfolio 未被改动，提前返回）。
+
+### 37.3 验证证据
+
+- `py_compile portfolio_tracker.py`：CE=0
+- `compileall -q agents tests tools core workflows <根目录 .py>`：CE=0
+- `pytest tests/ -q`：125 passed, 22 warnings（无回归）
+- 实盘语义抽查（独立脚本，临时 DATA_DIR）：
+  - 买入 100 股：cash 47705 → 46705
+  - 超额卖出 500 股（实持 100）：按 100 股平掉,pnl 330.00
+  - 资金不足：`{'error': '资金不足'}`
+  - 交易流水 3 条 `['buy', 'sell', 'sell']`，pnl `[0.0, 330.0, 66.0]`，买入也记账
+- `update_position` 112 → 34 行；`portfolio_tracker.py` 376 → 408 行
+
+### 37.4 本轮精简总结
+
+自 32 节起连续拆分六个超大函数，当前 `git ls-files '*.py'` 中最长函数：
+
+- `agents/risk_manager_agent.py:35 run` 156 行（属 Agent 模板类 run 方法，
+  下一批候选）
+- `technical_indicators.py:185 analyze_stock` 127 行
+- `agents/trader.py:35 run` 119 行
+
+118 行以下的候选仍有 20 余个，需要按「是否有测试覆盖 / 是否在资金路径上」
+排优先级，不宜继续逐个平均用力。
+
 
