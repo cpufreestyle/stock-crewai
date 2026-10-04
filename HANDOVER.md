@@ -1546,3 +1546,51 @@ docs/ 目录仍在（CI 的 test -d docs 不会失败）；
 README/CONTRIBUTING/DOCKER 三份文档里没有指向已归档文档的死链；
 compileall 干净、125 测试全过。
 
+
+
+## 二十八、CI 与 wiki 残留清理（2026-10-05）
+
+### 28.1 dependabot 死规则（076dfb7）
+
+`.github/dependabot.yml` 里还为 langchain-openai 留着版本忽略规则，
+而这个包在第二十节已从 requirements.txt 删掉（全仓 import 为 0）。
+规则留着只会让 dependabot 去关注一个不存在的依赖。
+
+删除过程中差点弄坏东西：我的脚本按行区间删，把紧邻的 pandas
+version-requirement 也一起删了，等于放开了 pandas 3.x 升级通道——
+而那正是该规则要防的 breaking change。已恢复为 >=2.0.0,<3.0.0。
+numpy / torch / transformers 的忽略规则保留（那几个仍在依赖树里）。
+删完用 yaml.safe_load 解析验证，5 条规则与预期一致。
+
+### 28.2 wiki 残留归档（076dfb7）
+
+- wiki/projects/claude-harness-health.md：harness_guard.py 在 6/20 生成的
+  “正常运行”快照。那个 harness 已在 26.2 连同 harness-start.bat 一起退场，
+  这份快照是它唯一的产物，留着只会让人以为 harness 还活着。
+- wiki/index.md：由 Auto-sync Wiki 工作流生成，但生成的 markdown 里有
+  **未渲染的 shell 语法**（$(git log --oneline -5 | ...) 原样出现在代码块里，
+  因为替换写在了围栏代码块内，永远不会被执行）。内容又只是重复 git log。
+
+两个文件连同 harness/PROFILE.md 那批一起归档到
+_quarantine/2026-10-05/stale-wiki/ 并附说明；wiki/ 空目录已删。
+wiki-sync.yml 工作流**故意保留**：它每次跑都会 mkdir -p wiki 重建目录，
+删空目录不影响它；真要下架这个工作流属于部署行为变更，超出精简范围，
+记录在此供后续决定。
+
+### 28.3 CI 的 lint 步骤是装饰品（本轮未改，仅记录）
+
+ci.yml 里 black / isort / flake8 三个检查都以 `|| true` 结尾，
+即无论查出什么问题都返回成功，CI 永远是绿的。
+
+本想改成真正的门禁，但本地没装 black 无法预判结果，且这个仓库
+从未按 black 格式化过（随处可见 `import sys; sys.stdout.reconfigure(...)`
+单行写法、混合换行符），改成硬门禁极可能让每次 push 直接变红，
+比现状更糟。要真上门禁得先跑一次 black --diff 评估改动量，
+那是独立的一次改动，不塞进精简。
+
+### 28.4 验证
+
+dependabot.yml 经 yaml.safe_load 解析通过、5 条规则符合预期；
+wiki/ 已不存在，wiki-sync.yml 的 mkdir -p wiki 保证其仍可自愈；
+compileall 干净、125 测试全过、工作树干净。
+
