@@ -218,50 +218,6 @@ def generate_trading_signal(stock_code: str, stock_name: str, technical_data: di
         return {"signal": "持有", "confidence": 0, "reason": f"分析失败: {e}", "ok": False}
 
 
-def market_overview_report() -> str:
-    """生成市场总览报告（LLM分析）"""
-    try:
-        import data_fetcher as df
-
-        # 获取市场热度
-        heat = df.get_market_heat()
-
-        # 获取板块表现
-        sectors = df.get_sector_performance()
-
-        prompt = f"""请基于以下数据，生成今日A股市场总览。
-
-市场热度：
-- 涨停家数: {heat.get('涨停家数', 'N/A')}
-- 跌停家数: {heat.get('跌停家数', 'N/A')}
-- 市场状态: {heat.get('市场状态', 'N/A')}
-
-领涨板块：
-{chr(10).join(['- ' + s['name'] + ': ' + str(s['change_pct']) + '%' for s in sectors[:5]])}
-
-请按以下格式回复：
-市场概况: 一句话总结
-主线板块: 当前市场主线
-操作建议: 给出3条操作建议
-"""
-
-        if llm_client == "openai":
-            return _chat(prompt, temperature=0.5)
-
-        elif llm_client == "ollama":
-            r = requests.post(
-                "http://localhost:11434/api/generate",
-                json={"model": "llama2", "prompt": prompt, "stream": False},
-                timeout=30
-            )
-            return r.json().get("response", "")
-
-        else:
-            return "市场概况: 使用QClaw内置分析\n主线板块: 待分析\n操作建议: 待分析"
-
-    except Exception as e:
-        return f"生成市场总览失败: {e}"
-
 
 if __name__ == "__main__":
     print("测试 LLM 分析模块...")

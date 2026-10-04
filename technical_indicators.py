@@ -312,11 +312,6 @@ def analyze_stock(code: str) -> Dict:
     }
 
 
-def generate_signal(analysis: Dict) -> str:
-    """从分析结果生成交易信号（兼容旧接口）"""
-    return analysis.get("signal", "NEUTRAL")
-
-
 if __name__ == "__main__":
     # 测试
     print("=== 技术指标测试 ===")
