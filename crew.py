@@ -22,7 +22,10 @@ import data_fetcher as df
 import portfolio_tracker as pt
 from tools.stock_tools import FundamentalAnalysisTool
 from tools.risk_tools import (StopLossAdviceTool, RiskRewardTool,
-                              PortfolioRiskTool, CircuitBreakerCheckTool)
+                              PortfolioRiskTool, CircuitBreakerCheckTool,
+                              PositionSizeTool)
+from tools.trade_tools import ViewPortfolioTool
+from tools.notify_tools import get_notify_tools
 from backtest import multi_strategy_backtest
 import recommendation_tracker as rt
 import trading_plan as tp_plan
@@ -246,6 +249,61 @@ def notify_wechat(message: str):
         return False  # 静默跳过
 
 
+def build_agents() -> dict:
+    """装配七个 CrewAI Agent（含各自的工具白名单与 max_iter）。
+
+    dry_run_offline.py 必须调用本函数，不能自己重建一份：9/26 出现过干跑脚本按
+    默认全量工具装配、与 crew.py 实际传参不一致，于是"文档说情绪工具已禁用、
+    代码其实还挂着 3 个"这种假验证能一路通过干跑。
+    """
+    market_watcher = MarketWatcherAgent().create_crewai_agent()
+    # 候选池的行情/估值/板块/新闻已由 prepare_market_data 内联进任务描述，
+    # 这里只留批量版 fundamental_analysis：run6 实测给它 9 个工具会逐只调
+    # technical_analysis / news_sentiment（38 次调用），烧光 max_iter 后只吐框架提示语回显。
+    researcher = ResearcherAgent().create_crewai_agent(tools=[FundamentalAnalysisTool()])
+    # 风控/交易员/调仓要按持仓逐只调评估类工具（9/26 实测风控 8 轮就撞上限，
+    # 回显框架收尾提示语，下游交易员同样只回显），这三个单独放宽 max_iter。
+    # 风控只给"评估类"工具：position_size 是买入 sizing、kelly_position 要胜率历史，
+    # 都不在本任务范围内——9/26 实测风控拿到全套后在 position_size 上反复微调
+    # risk_per_trade（0.008→0.009→0.0085），48 次调用把迭代烧光，触发与 run6 同款的
+    # 假成功（回显框架收尾提示语 + 大面积 @ 填充），下游交易员/调仓同样被毒化成 @ 复读。
+    risk_mgr = RiskManagerAgent().create_crewai_agent(
+        tools=[StopLossAdviceTool(), RiskRewardTool(),
+               PortfolioRiskTool(), CircuitBreakerCheckTool()],
+        max_iter=25,
+    )
+    # 交易员/调仓师一律"只出建议、不落盘"：execute_buy / execute_sell / set_stop_loss
+    # 会真改 portfolio.json 与 history/trades_YYYYMM.json（pt.update_position /
+    # pt.set_stop_loss）。让 LLM 在"分析"里自己决定下不下单，等于每跑一次日报就
+    # 改一次持仓（run6 有 4 次 execute_sell）。下单只保留在 run_virtual_v4.py 那条
+    # 独立的模拟盘路径里。position_size 补进交易员：任务提示词一直引用它，
+    # 而 TraderAgent 的默认工具集里根本没有，模型只能凭空编股数。
+    trader = TraderAgent().create_crewai_agent(
+        tools=[ViewPortfolioTool(), PositionSizeTool(),
+               StopLossAdviceTool(), RiskRewardTool()] + get_notify_tools(),
+        max_iter=25,
+    )
+    # 情绪分析不给工具：tools/sentiment_tools.py 里三个工具最终都走 _news_sentiment_tool，
+    # 而它的唯一数据源 akshare stock_news_em 目前必抛 ArrowInvalid。更糟的是
+    # _stock_sentiment_score_tool 解析失败评分时会静默返回 50/100，等于把"接口挂了"
+    # 伪装成"情绪中性"喂给下游。任务提示词也已改为只用 context 里的量价数据打分。
+    sentiment_analyst = SentimentAgent().create_crewai_agent(tools=[])
+    backtest_validator = BacktestAgent().create_crewai_agent()
+    rebalancer = PortfolioRebalancerAgent().create_crewai_agent(
+        tools=[ViewPortfolioTool(), StopLossAdviceTool()] + get_notify_tools(),
+        max_iter=25,
+    )
+    return {
+        "market_watcher": market_watcher,
+        "researcher": researcher,
+        "risk_mgr": risk_mgr,
+        "trader": trader,
+        "sentiment_analyst": sentiment_analyst,
+        "backtest_validator": backtest_validator,
+        "rebalancer": rebalancer,
+    }
+
+
 def run_daily_analysis(with_backtest: bool = True) -> str:
     """运行每日分析流程"""
     print(f"\n{'='*60}")
@@ -286,33 +344,14 @@ def run_daily_analysis(with_backtest: bool = True) -> str:
     
     # 5. 创建 Agents
     print("[4/8] 初始化 CrewAI Agents...")
-    market_watcher = MarketWatcherAgent().create_crewai_agent()
-    # 候选池的行情/估值/板块/新闻已由 prepare_market_data 内联进任务描述，
-    # 这里只留批量版 fundamental_analysis：run6 实测给它 9 个工具会逐只调
-    # technical_analysis / news_sentiment（38 次调用），烧光 max_iter 后只吐框架提示语回显。
-    researcher = ResearcherAgent().create_crewai_agent(tools=[FundamentalAnalysisTool()])
-    # 风控/交易员/调仓三个智能体要按持仓逐只调 stop_loss_advice / risk_reward /
-    # set_stop_loss / execute_sell（9/26 实测风控 8 轮就撞上限，回显框架收尾提示语，
-    # 下游交易员同样只回显）。这三个智能体单独放宽 max_iter，其余仍走 AGENT_MAX_ITER。
-    # 风控只给"评估类"工具：position_size 是买入 sizing、kelly_position 要胜率历史，
-    # 都不在本任务范围内——9/26 实测风控拿到全套后在 position_size 上反复微调
-    # risk_per_trade（0.008→0.009→0.0085），48 次调用把迭代烧光，触发与 run6 同款的
-    # 假成功（回显框架收尾提示语 + 大面积 @ 填充），下游交易员/调仓同样被毒化成 @ 复读。
-    # 写操作工具（execute_*/set_stop_loss）不给风控：本任务只出"建议"，不下单。
-    risk_mgr = RiskManagerAgent().create_crewai_agent(
-        tools=[StopLossAdviceTool(), RiskRewardTool(),
-               PortfolioRiskTool(), CircuitBreakerCheckTool()],
-        max_iter=25,
-    )
-    trader = TraderAgent().create_crewai_agent(max_iter=25)
-    # 新增 Agent
-    # 情绪分析不给工具：tools/sentiment_tools.py 里三个工具最终都走 _news_sentiment_tool，
-    # 而它的唯一数据源 akshare stock_news_em 目前必抛 ArrowInvalid。更糟的是
-    # _stock_sentiment_score_tool 解析失败评分时会静默返回 50/100，等于把"接口挂了"
-    # 伪装成"情绪中性"喂给下游。任务提示词也已改为只用 context 里的量价数据打分。
-    sentiment_analyst = SentimentAgent().create_crewai_agent(tools=[])
-    backtest_validator = BacktestAgent().create_crewai_agent()
-    rebalancer = PortfolioRebalancerAgent().create_crewai_agent(max_iter=25)
+    agents = build_agents()
+    market_watcher = agents["market_watcher"]
+    researcher = agents["researcher"]
+    risk_mgr = agents["risk_mgr"]
+    trader = agents["trader"]
+    sentiment_analyst = agents["sentiment_analyst"]
+    backtest_validator = agents["backtest_validator"]
+    rebalancer = agents["rebalancer"]
     print("[完成]\n")
     
     # 6. 构建任务链

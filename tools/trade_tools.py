@@ -7,11 +7,49 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import json
+import logging
 from pydantic import BaseModel, Field
 from tools.compat import BaseTool
 
 import portfolio_tracker as pt
 import data_fetcher as df
+
+logger = logging.getLogger("tools.trade")
+
+# 真值集合按环境变量惯例从宽：1/true/yes/on 都算开。
+_TRUTHY = {"1", "true", "yes", "on"}
+
+# 拼进三个写工具的 description：万一它们又被塞回某个 LLM 的工具集，
+# 模型至少能提前知道这个工具在默认配置下只会拒绝，不至于反复重试烧光 max_iter。
+_GATE_NOTE = " Refuses with advice_only=true unless ALLOW_AGENT_TRADING=1 is set."
+
+
+def trading_allowed() -> bool:
+    """下单类工具的总开关，默认拒绝。
+
+    分析流水线不得改持仓：crew.py 每交易日 15:35 由计划任务无人值守触发，
+    10-02 那次日报真的清仓了 000425 六百股并写进 result_latest.md 的"已执行操作"。
+    crew.py 已在工具白名单层面剔除这三个工具，但 workflows/daily_analysis.py 走的是
+    AgentBase.run() 旧编排路径，agents/*.py 的 self.tools 仍含 get_trade_tools()，
+    手动跑 main.py 或点 web_dashboard 一样会真下单——所以这里再兜一道。
+    run_virtual_v4.py 的模拟盘下单直接调 portfolio_tracker，不经过本模块，不受影响。
+    """
+    return (os.getenv("ALLOW_AGENT_TRADING", "") or "").strip().lower() in _TRUTHY
+
+
+def _refusal(action: str) -> str:
+    logger.warning(
+        "[trade] %s 被拒：未设 ALLOW_AGENT_TRADING，当前为只出建议模式", action
+    )
+    return json.dumps({
+        "success": False,
+        "advice_only": True,
+        "error": (
+            f"{action} refused: agent trading is disabled. "
+            "This pipeline only produces advice and must not modify portfolio.json. "
+            "Set ALLOW_AGENT_TRADING=1 to enable real order placement."
+        ),
+    }, ensure_ascii=False)
 
 
 # ── Execute Buy ──────────────────────────────────────────────────────
@@ -24,10 +62,12 @@ class ExecuteBuyInput(BaseModel):
 
 class ExecuteBuyTool(BaseTool):
     name: str = "execute_buy"
-    description: str = "Execute buy operation (virtual account), update position and funds. Checks fund sufficiency before buying."
+    description: str = "Execute buy operation (virtual account), update position and funds. Checks fund sufficiency before buying." + _GATE_NOTE
 
     def _run(self, code: str = "", name: str = "", price: float = 0,
              shares: int = 0, reason: str = "", **kwargs) -> str:
+        if not trading_allowed():
+            return _refusal("execute_buy")
         try:
             if not code or price <= 0 or shares <= 0:
                 return json.dumps({"error": "incomplete parameters: need code, price, shares"}, ensure_ascii=False)
@@ -84,10 +124,12 @@ class ExecuteSellInput(BaseModel):
 
 class ExecuteSellTool(BaseTool):
     name: str = "execute_sell"
-    description: str = "Execute sell operation (virtual account), update position and funds. Can sell all or partially."
+    description: str = "Execute sell operation (virtual account), update position and funds. Can sell all or partially." + _GATE_NOTE
 
     def _run(self, code: str = "", price: float = 0, shares: int = 0,
              reason: str = "", **kwargs) -> str:
+        if not trading_allowed():
+            return _refusal("execute_sell")
         try:
             if not code:
                 return json.dumps({"error": "please provide stock code"}, ensure_ascii=False)
@@ -156,9 +198,11 @@ class SetStopLossInput(BaseModel):
 
 class SetStopLossTool(BaseTool):
     name: str = "set_stop_loss"
-    description: str = "Set stop loss and take profit prices for a stock"
+    description: str = "Set stop loss and take profit prices for a stock" + _GATE_NOTE
 
     def _run(self, code: str = "", stop_loss: float = 0, take_profit: float = 0, **kwargs) -> str:
+        if not trading_allowed():
+            return _refusal("set_stop_loss")
         try:
             if not code:
                 return json.dumps({"error": "please provide stock code"}, ensure_ascii=False)

@@ -136,8 +136,9 @@ def create_trading_task(trading_agent, research: str, risk: str, market: str) ->
 - position_size 每只股票最多调用一次，接受返回的股数（已按整百股取整），
   不要反复微调 stop_loss_pct / risk_per_trade 去凑心仪的股数
   （9/26 实测把 risk_per_trade 从 0.008 改成 0.009 再改 0.0085，24 次调用烧光迭代）。
-- 止损止盈价用风控建议里的数字或 stop_loss_advice 的结果，每只股票至多再调一次
-  set_stop_loss。
+- 止损止盈价用风控建议里的数字或 stop_loss_advice 的结果。
+- 本任务**只输出计划，不执行任何交易**：没有下单类工具可用，
+  止损止盈写进表格即可，不要试图"设置"或"提交"它们。
 - 表格与纪律写完后直接输出终稿，不要再调用任何工具。
 
 【输出格式要求——抬底前必须附上机器可读摘要】
@@ -193,16 +194,19 @@ backtest 工具支持一次查询多只：请把全部候选代码用逗号拼�
 def create_rebalance_task(rebalancer_agent, trade_plan: str, market_state: str) -> Task:
     """动态调仓任务"""
     return Task(
-        description=f"""根据市场变化和持仓表现，动态调整仓位：
+        description=f"""根据市场变化和持仓表现，给出动态调仓**建议**：
         交易计划：{trade_plan}
         市场状态：{market_state}
-        请分析是否需要止损、止盈或调仓。谨慎执行明确的止损/止盈操作。
+        请分析每只持仓是否需要止损、止盈或加减仓，并说明理由。
+
+【只出建议，不执行】
+本任务没有下单类工具，任何"已执行"的表述都是编造。请对每只持仓输出：
+建议动作（buy/sell/add/reduce/hold/watch）+ 触发条件（具体价位或涨跌幅）+ 建议股数 + 一句话理由。
 
 【工具使用纪律】
 - 先用 view_portfolio 看一次持仓，之后同一数据不要重复查询。
-- 每只持仓的止损/止盈/加减仓决策只执行一次对应工具（execute_sell / set_stop_loss 等），
-  接受执行结果，不要对同一操作换参数反复重试。
-- 决策完成后直接输出调仓报告，不要再调用任何工具。
+- 需要止损价参考时，每只持仓至多调一次 stop_loss_advice，接受返回值。
+- 建议写完后直接输出终稿，不要再调用任何工具。
 
 【输出格式要求——抬底前必须附上机器可读摘要】
 在报告最末尾追加一个 ```json 代码块（除此块外，不要再写任何代码块）：
@@ -212,5 +216,5 @@ def create_rebalance_task(rebalancer_agent, trade_plan: str, market_state: str) 
 - code 必须是 6 位 A 股代码；没有的字段写 null，不要省略键名
 """,
         agent=rebalancer_agent,
-        expected_output="动态调仓报告，包含建议的操作和已执行的操作"
+        expected_output="动态调仓建议报告，逐只持仓给出建议动作、触发条件和建议股数（不含任何已执行操作）"
     )

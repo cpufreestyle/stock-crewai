@@ -7,14 +7,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import crew
-from agents.market_watcher import MarketWatcherAgent
-from agents.researcher import ResearcherAgent
-from agents.sentiment_agent import SentimentAgent
-from agents.backtest_agent import BacktestAgent
-from agents.risk_manager_agent import RiskManagerAgent
-from agents.trader import TraderAgent
-from agents.portfolio_rebalancer import PortfolioRebalancerAgent
-from tools.stock_tools import FundamentalAnalysisTool
 from tasks import (
     create_market_analysis_task, create_research_task, create_sentiment_task,
     create_backtest_task, create_risk_task, create_trading_task,
@@ -32,16 +24,27 @@ print(f"显式缺口标记 -> {md.count('估值=暂缺')}  新闻不可用 -> {m
 print("=" * 60)
 print("2) Agent 与 Task 装配")
 print("=" * 60)
-mw = MarketWatcherAgent().create_crewai_agent()
-rs = ResearcherAgent().create_crewai_agent(tools=[FundamentalAnalysisTool()])
-sa = SentimentAgent().create_crewai_agent(tools=[])
-bv = BacktestAgent().create_crewai_agent()
-rk = RiskManagerAgent().create_crewai_agent()
-tr = TraderAgent().create_crewai_agent()
-rb = PortfolioRebalancerAgent().create_crewai_agent()
-print(f"researcher tools -> {[t.name for t in rs.tools]}  max_iter={rs.max_iter}")
-print(f"sentiment tools  -> {[t.name for t in sa.tools]}")
-print(f"backtest tools   -> {[t.name for t in bv.tools]}")
+# 必须走 crew.build_agents()：自己重建一份就会按默认全量工具装配，
+# 与 crew.py 实际传参不一致，干跑从此验不出工具集回归（9/26 情绪工具就是这么漏的）。
+ag = crew.build_agents()
+mw = ag["market_watcher"]
+rs = ag["researcher"]
+sa = ag["sentiment_analyst"]
+bv = ag["backtest_validator"]
+rk = ag["risk_mgr"]
+tr = ag["trader"]
+rb = ag["rebalancer"]
+for key in ("market_watcher", "researcher", "sentiment_analyst", "backtest_validator",
+            "risk_mgr", "trader", "rebalancer"):
+    a = ag[key]
+    print(f"{key:18} tools -> {[t.name for t in a.tools]}  max_iter={a.max_iter}")
+
+# 写操作工具一旦回到分析流水线，每跑一次日报就会改一次 portfolio.json
+WRITE_TOOLS = {"execute_buy", "execute_sell", "set_stop_loss"}
+leaks = {k: WRITE_TOOLS & {t.name for t in a.tools} for k, a in ag.items()}
+leaks = {k: v for k, v in leaks.items() if v}
+print(f"写操作工具泄漏 -> {leaks or '无'}")
+assert not leaks, f"分析流水线不得携带下单类工具: {leaks}"
 
 M, R, K, T = "«市场»", "«研究»", "«风控»", "«交易»"
 market_task = create_market_analysis_task(mw, md)

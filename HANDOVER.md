@@ -1,16 +1,51 @@
 # 交接文档：stock-crewai 七智能体端到端验证
 
-> 生成时间：2026-09-19；最后更新：2026-09-26 20:10
+> 生成时间：2026-09-19；最后更新：2026-10-03 23:15
 > 背景：项目用 CrewAI 七智能体做 A 股投资分析。**模型端点由 `.env` 的 `OPENAI_BASE_URL` + `MODEL_NAME` 决定
-> （`LLM_PROVIDER` 未设 → 走 `agents/llm.py` 的 OpenAI 兼容缺省分支），当前是 StepFun 云端 `step-5-preview` + `/step_plan/v1`**；
-> 9/24 之前一直是本地 `qwen3.8:q2big`（Qwen3.8-27B-Q2_K 约 11GB，经 Ollama 的 `/v1`），
-> 那套配置的完整取舍仍留在 `.env` 下半部注释里，回退只需解注释。
+> （`LLM_PROVIDER` 未设 → 走 `agents/llm.py` 的 OpenAI 兼容缺省分支），当前是本地 Ollama
+> `qwen3.8-gsq-rco-iq3s`（27B IQ3_S，`http://127.0.0.1:11434/v1`）**；
+> 9/26 白天曾短暂切到 StepFun 云端 `step-5-preview`，当晚换回本地 GSQ-RCO，
+> 那套云端配置以注释形式留在 `.env` 下半部，回退只需解注释（key 须用户本人粘贴）。
 > 调用链两个时代共用：`agents/llm.py:get_llm()` → CrewAI(litellm)。
 > 目标：把 `crew.py` 完整跑通端到端（行情→选股→情绪→回测→风险→交易→调仓→落盘 result_latest.md）。
+> **该目标已达成**：run5 起 7/7 任务全真实输出，`result_latest.md` 每交易日 15:35 由计划任务自动刷新。
 
 ---
 
-## 当前状态（2026-09-26 20:10）
+## 当前状态（2026-10-03 23:15）
+
+- **分析流水线已彻底改为"只出建议、不持仓落账"**（第十六节，两道防线）：
+  ① `crew.py:build_agents()` 的工具白名单不含任何下单类工具；
+  ② `tools/trade_tools.py` 三个写工具入口有总开关 `trading_allowed()`，
+  读环境变量 `ALLOW_AGENT_TRADING`（`1/true/yes/on` 才放行，**默认拒绝**）。
+  第 ② 道是给旧编排路径（`workflows/daily_analysis.py` / `main.py --scheduler` /
+  `web_dashboard.py`）兜底的，那条路的 `agents/*.py` 仍挂着 `get_trade_tools()`。
+  `.env` 现在**没有**这个键 → 当前就是只出建议模式。要恢复自动下单须显式设
+  `ALLOW_AGENT_TRADING=1`，且这是行为变更、动之前先问用户。
+- 端到端早已不是问题：`result_latest.md` 由计划任务 `stock-crewai-daily-run`
+  每周一至周五 15:35 自动刷新（最近一份 2026-10-03 23:02，是本次改动后的手动实跑；
+  下一份自动日报是 10-05 周一 15:35）。
+- **改动后的链路已实跑验证过**（16.5 第 3 层）：10/3 22:47–23:02 手动跑 `crew.py`
+  → 7/7 任务真实完成、0 个假成功标记、日报里 0 处"已执行"表述、日志中连一次下单尝试都没有
+  （`advice_only` 命中 0，因为工具不在集合里），`portfolio.json` 的现金与四只持仓
+  逐字段跑前跑后一致。所以周一 15:35 那次无人值守运行**不是**首跑。
+- **测试 56 个用例全绿**（`pytest tests/ -q`，约 30s）。其中
+  `TestAgentToolWhitelist`（3 例）锁 ①、`TestAgentTradingGate`（5 例）锁 ②。
+- **零 token 自检 `dry_run_offline.py` 已改为调 `crew.build_agents()`**：
+  它此前自己按默认全量工具重建一份 agent，与 `crew.py` 实际传参是两份代码，
+  所以验不出工具集回归（9/26 情绪工具"文档说禁用、代码还挂着 3 个"就是这么漏的）。
+  现在会逐条打印七个 agent 的工具并对写操作工具做断言。
+- 遗留未决三项，都需要用户拍板，未擅自动手：
+  1. **旧路径调仓永远报"无持仓"**（16.7）：`PortfolioRebalancerAgent.run()` 把
+     `view_portfolio` 当字典读 `holdings`，而该工具返回的是 `{"summary": <字符串>}`。
+     只影响旧编排路径。修它等于让一条一直空转的路径第一次真产出动作，属行为变更。
+  2. **微信推送仍开着**：`crew.py:notify_wechat()` 走 `openclaw`（本机在 PATH 上），
+     交易员/调仓师也仍带着 `wechat_notify`/`dashboard_notify` 两个通知工具。
+     本次只动了"写持仓"这一类副作用，通知类刻意原样保留。
+  3. **开机脚本的 num_ctx 校准作用域过大**（6.1）：`start_local_stack.ps1` 会改写
+     本机**所有**模型的参数 blob，10/2 已实测顺带把无关模型 `q38-lite` 的配置改掉了。
+
+### 2026-09-26 那次换型与当时的状态（历史记录，仍然有效）
 
 - **模型已换成本地 GSQ-RCO：`qwen3.8-gsq-rco-iq3s`（ISTA-DASLab/Qwen3.8-27B-GSQ-RCO IQ3_S）**，
   即用户 9/26 指定要下载部署的 gsq-rco。27B / 3.50bpw / task-lossless（README 口径 AIME25、
@@ -180,8 +215,14 @@ kwargs["additional_params"] = {"reasoning_effort": reasoning_effort}
 
 ## 六、环境状态清单
 
-**当前（9/26 起）= StepFun 云端**：`step-5-preview` @ `https://api.stepfun.com/step_plan/v1`，
-无本地依赖、无显存约束；下面是切云端之前最后一次本地环境的快照，**回退 Ollama 时才用得上**。
+**当前 = 本地 Ollama `qwen3.8-gsq-rco-iq3s`**（`http://127.0.0.1:11434/v1`，num_ctx 参数层锁 16384）。
+10/3 实测：`/api/version` 回 **0.33.2**、`ollama ps` 空（模型已按设计释放）、
+`ollama list` 有两个 11G 模型：`qwen3.8-gsq-rco-iq3s:latest`（在用）与
+`q38-lite:latest`（**仓库内零引用**，不是本流水线用的，别改 `.env` 指向它）。
+计划任务 `stock-crewai-daily-run` 下次运行 2026-10-05(周一) 15:35；10/3、10/4 是周末不跑属正常。
+
+> 下面这段是**切云端之前最后一次本地环境的快照**（模型名与显存数字属于 9/26 之前的 q2big 时代），
+> 保留只为查历史故障用，不代表现状。
 
 - 模型 `qwen3.8:q2big`：✅ 当时**正在使用**，与 `q2` 同一份 GGUF，`num_ctx 32768`，22.8k token prompt 实测可用
 - 模型 `qwen3.8:q2`：✅ 完好但 `num_ctx 8192` 已不够用，仅留作对照
@@ -191,6 +232,31 @@ kwargs["additional_params"] = {"reasoning_effort": reasoning_effort}
 - litellm 1.100.1、crewai 1.15.21：✅ 已装；**注意 crewai 只装在 Python 3.12**
   （默认 `python` 是 3.14，直接 `python crew.py` 会 ModuleNotFoundError）
 - 早前清理：已删死代码 `agents.py`、已删孤儿 blob `sha256-028a1d47`
+
+### 6.1 `start_local_stack.ps1` 会改写**所有**模型的 num_ctx（10/3 发现，未修）
+
+`logs/autostart-20261002-233727.log` 里有一行：
+
+```
+num_ctx fixed in sha256-9e0cb792...: {"num_ctx":8192,"num_gpu":56} -> {"num_ctx":16384}
+```
+
+`sha256-9e0cb792...` 不是 gsq-rco 的参数 blob。10/3 逐个 manifest 核实过（Ollama 按内容寻址，
+params 层就是那两个 sha256 文件）：
+
+```
+manifests/…/q38-lite/latest                → params sha256:9e0cb792…  model sha256:64b53b64…
+manifests/…/qwen3.8-gsq-rco-iq3s/latest    → params sha256:ca776b6b…  model sha256:64b53b64…
+```
+
+也就是说 `sha256-9e0cb792…` 属于 `q38-lite`。它和 gsq-rco **共用同一份权重层**
+（`64b53b64…`），只是 params 层不同，所以不额外占 11G 磁盘；差异在推理配置上
+（被改前是 `num_ctx 8192 + num_gpu 56`，即只把 56 个张量放 GPU 的"半 CPU 档"）。
+结论：开机脚本为了兜住"模型被重建"，扫描并改写了**每一个**参数 blob 的 num_ctx，
+顺带把一个无关模型的配置静默改成 `{"num_ctx":16384}`、并且整个丢掉了 `num_gpu` 字段。
+目前没造成可观察故障（那个模型没进 `.env`，流水线不引用它），
+但这是"校准脚本的作用域大于它服务的模型"这类越界写，下一次导入新模型时同样会被改。
+要不要收窄到只匹配 gsq-rco 的 params 层，属行为变更，留给用户拍板。
 
 ---
 
@@ -225,8 +291,9 @@ kwargs["additional_params"] = {"reasoning_effort": reasoning_effort}
      剩下的同形风险是 `stop_loss_advice`/`risk_reward`（按持仓逐只调用，run6 调了 10 次）
      和调仓的 5 个工具混用 —— `max_iter=4` 撑不住 5 只持仓各查一次。
      要么让这些工具支持一次多码，要么单独给这两个智能体放宽 `AGENT_MAX_ITER`
-   - **调仓任务的写操作**：`execute_sell` 在分析循环里直接改 `portfolio.json`（10.4），
-     是否改为"只出建议 + 人工确认后再记账"需用户拍板
+   - ~~**调仓任务的写操作**：`execute_sell` 在分析循环里直接改 `portfolio.json`（10.4），
+     是否改为"只出建议 + 人工确认后再记账"需用户拍板~~ ✅ **2026-10-03 用户拍板：改为只出建议**，
+     交易员与调仓师的工具白名单已剔除全部下单类工具，见第十六节
    - ~~prompt 瘦身：`research_task` 同时注入市场分析与完整 `market_data`，实测单请求 5k token 里有重复~~
      **这条已过期**（9/24 19:40 复量）：`market_analysis` 现在只是 `CTX_REF_MARKET` 那句指代文案，
      不再是原始数据块。实测 7 个任务描述合计约 2633 token（`market_data` 本体 1590 字符 ≈ 800 token，
@@ -369,9 +436,12 @@ D 盘 682G 用了 666G、清完残留只剩 17G，因此**失败于 `There is no
 `{"error": "Extra data: line 41 column 2 (char 858)"}` → 重试 → `Maximum iterations reached`。
 即 9.2 节的撕裂写**不只是崩数据，也是那次空转的起因**；读写同锁的修复应当同时解决两者。
 
-> **未动但值得决策的一点**：调仓智能体在"分析"过程中直接下单改持仓（run6 有 4 次 `execute_sell`）。
-> 这是纸面账户，但把不可逆的写操作放进一个 LLM 自由决定的工具循环里，风险由用户拍板：
-> 要不要改成只出建议、由人工/`main.py` 确认后再生成成交记录。
+> **已于 2026-10-03 拍板并落地**：调仓智能体曾在"分析"过程中直接下单改持仓（run6 有 4 次
+> `execute_sell`，10-02 那次日报还清仓了徐工机械 600 股并写进了 `result_latest.md` 的
+> "已执行操作"一节）。用户选择**只出建议、不落盘**：交易员与调仓师的工具白名单已剔除
+> `execute_buy`/`execute_sell`/`set_stop_loss`，提示词同步改为禁止出现"已执行"表述。
+> 细节与验证见第十六节。注意历史成交记录（`portfolio.json`、`history/trades_202609.json`
+> 及之后各月）里已经留有此前自动下单的痕迹，本次改动不会回滚它们。
 
 ### 10.5 同一形状的坑还有三处，一并修了
 
@@ -466,7 +536,8 @@ run4 调仓师连发 5 笔卖出后，第 6 笔起全部报
 至此 9/26 模型切换后的完整成绩：run1 5/7 → run2 4/7 → run3 7/7 → run4 6/7（调仓师被
 撕裂写打崩）→ run5 7/7（修复后）。剩余已知瑕疵均为既有问题，与本次换型无关：
 持仓"现价=成本"未刷新（`fix_last_price.py`）、akshare 新闻接口必坏（10.6）、
-写入型工具在分析循环里直接落账（8.4，待用户拍板是否改"建议+人工确认"）。
+写入型工具在分析循环里直接落账（8.4，~~待用户拍板是否改"建议+人工确认"~~
+→ 2026-10-03 已拍板并落地，见第十六节）。
 
 ### 11.5 已实测的模型能力边界（9/26 晚）
 
@@ -603,55 +674,76 @@ kickoff 后遍历 `crew.tasks[i].output`：
   并行回测）均随线验证，无回归。
 - 统计：端到端成功率 run3 7/7 → run5 7/7 → run6 7/7 → run7 5/7（退化尚未防护）
   → run8 7/7（退化可检测）。剩余已知弊端：@ 复读只能检测不能预防；
-  akshare 新闻接口必坏（10.6）；写入型工具在分析循环里直接落账（8.4，待用户拍板）。
+  akshare 新闻接口必坏（10.6）；~~写入型工具在分析循环里直接落账（8.4，待用户拍板）~~
+  → 已于 2026-10-03 改为只出建议（第十六节）。
 （run7 的 @ 复读就是这种形态，旧的 Maximum iterations 排查抓不到它）。
 
 ---
 
-## 附：关键命令速查（StepFun 云端路线，9/26 改版）
+## 附：关键命令速查（本地 Ollama 路线，2026-10-03 改版）
 
 ```powershell
 cd D:\aishare\repo\stock-crewai-master
 $py = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
 
-# 0) 跑前 30 秒体检 —— 三项按顺序，第一项最容易被跳过
-(Get-Content .env | Select-String '^OPENAI_API_KEY=').ToString().Split('=')[1].Length
-#   ↑ 必须是 64。等于 11 或含 … 就说明 key 又被工具侧截断了（见"当前状态"），白跑的概率 100%
-& $py -u dry_run_offline.py    # 零 LLM 调用、不花 token：数据层 + 任务装配 + prompt 体量，约 30s
-curl.exe -sS -m 20 -o NUL -w "models_ep=%{http_code}\n" https://api.stepfun.com/step_plan/v1/models `
-  -H "Authorization: Bearer $((Get-Content .env | Select-String '^OPENAI_API_KEY=').ToString().Split('=')[1])"
-#   ↑ 200 才算鉴权过。401 别去查模型名，先回到上面那条量字节
+# 0) 跑前体检（本地路线没有"密钥长度"这一步了，`.env` 里 OPENAI_API_KEY=ollama）
+curl.exe -sS -m 5 http://127.0.0.1:11434/api/version   # 服务会无崩溃记录地消失，见 13.3
+& $py -u dry_run_offline.py    # 零 LLM 调用、不花 token，约 30s：数据层 + 七个 agent 工具集 + prompt 体量
+#   ↑ 必看到 "写操作工具泄漏 -> 无"。这是第十六节那条不变量的快速版，装配期异常也在这里先炸
+ollama ps   # 模型没常驻时首请求会冷启（十几秒），不是卡死
 
-# 1) 2 分钟自检：走真实 CrewAI 调用链（这条同时是 Cause B 的回归工具）
+# 1) 回归测试（30s，不碰网络不碰模型）
+& $py -u -m pytest tests/ -q   # 当前基线：56 passed
+
+# 2) 手动跑一遍真实调用链（约 2 分钟，会真占显存）
 & $py verify_crewai_path.py     # PASS 标准：非空、约 1700 字、自然收尾
 
-# 2) 跑端到端前先给持仓拍一张快照（调仓任务会真的下单改 portfolio.json，见 10.4）
-Copy-Item portfolio.json ("portfolio.pre-run-" + (Get-Date -Format yyyyMMdd-HHmm) + ".json")
-
 # 3) 跑端到端 —— 必须用 Python 3.12（crewai 只在 3.12 环境里），且必须加 -u
+#    正常情况下不用手动跑：计划任务 stock-crewai-daily-run 每周一至周五 15:35 自动执行
+#    注意 Git Bash 里 `/tn` 会被当成路径（报 "找不到 D:/Program Files/Git/query"），
+#    要么在 PowerShell 跑，要么前置 MSYS_NO_PATHCONV=1。
+schtasks /query /tn stock-crewai-daily-run /v /fo LIST
+Copy-Item result_latest.md logs\result_pre-<改动名>.log   # 日报每次整体覆盖、无归档，跑前先留一份
 Start-Process -FilePath $py -ArgumentList -u, crew.py `
-  -RedirectStandardOutput crew_run7.log -RedirectStandardError crew_run7.err
-Get-Content crew_run7.log -Tail 30
+  -RedirectStandardOutput crew_run10.log -RedirectStandardError crew_run10.err
+Get-Content crew_run10.log -Tail 30
+ollama stop qwen3.8-gsq-rco-iq3s   # 跑完归还显存（14.3G→1.3G）；计划任务走 run_crew_then_release.py 会自动做
 
 # 4) 跑完必查"假成功"（10.1）：命中说明某个任务的输出只是框架提示语回显
-Select-String -Path crew_run7.log -Pattern "Maximum iterations reached|absolute best final answer"
+Select-String -Path crew_run10.log -Pattern "Maximum iterations reached|absolute best final answer"
+#    改动后还要各加一条：`Task Completed` 应为 7；`advice_only|被拒` 应为 0（见 16.5）
+
+# 5) 跑完确认持仓真没被动过（第十六节）。last_price/last_price_time 会变，那是
+#    prepare_market_data 里 refresh_position_prices 刷的现价，属于允许写入（16.4）；
+#    shares / avg_cost / stop_loss / take_profit / cash 必须与跑前完全一致。
+& $py -c "import json;p=json.load(open('portfolio.json',encoding='utf-8'));print(p['cash']);[print(c,v['shares'],v['avg_cost'],v.get('stop_loss'),v.get('take_profit')) for c,v in p['positions'].items()]"
+#   ↑ 2026-10-03 基线：cash 47705.0；000001 3200@11.38 sl10.4 tp13.1 / 000858 300@69.67 sl64.1 tp81.44
+#     / 000651 100@38.5 sl35.22 tp42.0 / 000333 100@80.1 sl73.69 tp88.0
 ```
 
 > `-u` 不是可选项：不加时 stdout 是块缓冲，日志文件会长时间停在 0 字节，
 > 整个 run 期间看不到任何进度（`crew_run6` 就是这么只能靠 Ollama 侧日志反推）。
 >
-> 回退本地 Ollama 时才需要旧那三条体检：`curl http://127.0.0.1:11434/api/version`（服务会无崩溃记录地消失）、
-> `ollama list`（17:11 那次模型被外部从磁盘删了）、`Get-PSDrive D | Select-Object Free`（见 9.3 的账），
-> 外加 `ollama ps ; nvidia-smi --query-gpu=memory.used,memory.total --format=csv` 看 `size_vram == size`。
+> **回退到 StepFun 云端时**才需要那三条云端体检：先量 `.env` 里 `OPENAI_API_KEY`
+> 的字节数（必须是 64；等于 11 或含 `…` 说明 key 被工具侧写入截断了，见下），
+> 再 `curl /step_plan/v1/models` 看 200，最后才怀疑模型名。
+> base_url 必须带 `/step_plan` 段。密钥**只能由用户本人粘贴**
+> （`Read-Host` 取变量后 `-replace` 写回 `.env`），工具侧写入必被截断，别再用脚本写 key。
+>
+> 本地路线自身的体检见 13.3（Ollama 版本事故恢复）与 14.2（守卫脚本六步）：
+> `ollama list`（9/26 17:11 那次模型被外部从磁盘删了）、
+> `Get-PSDrive D | Select-Object Free`（见 9.3 的账）、
+> `ollama ps ; nvidia-smi --query-gpu=memory.used,memory.total --format=csv` 看 `size_vram == size`。
 
 判据：`Invalid response from LLM call - None or empty.` 不是"模型抽风"，它是**三种不同故障的同一个外壳**：
 
-1. 服务端日志里有 `exceed_context_size_error`（HTTP 400）→ 上下文超限，加大 `num_ctx`（**仅本地 Ollama 会遇到**，云端实测峰值才 5k token）；
+1. 服务端日志里有 `exceed_context_size_error`（HTTP 400）→ 上下文超限，加大 `num_ctx`
+   （**本地 Ollama 才会遇到**；crew prompt 峰值实测约 5.6k token，参数层已锁 16384，余量 3 倍）；
 2. 服务端**全是 200** 但 `content` 为空、`finish=length`、生成 token 数正好等于 `max_tokens`
    → thinking 没被真正关掉，预算被吃满。此时**不要**先怀疑 `.env`，
    要拦截框架实际发出的 HTTP body 确认参数有没有出去：
-3. **HTTP 401 `invalid_api_key`** → 九成不是 key 错，是密钥在写入时被工具层截断（`length` 只有 11）。
-   先跑上面第 0 项量字节，再怀疑服务商。
+3. **HTTP 401 `invalid_api_key`**（仅云端路线）→ 九成不是 key 错，是密钥在写入时被工具层截断
+   （`length` 只有 11）。先按上面那条量字节，再怀疑服务商。
 
 ```python
 import openai.resources.chat.completions as m
@@ -715,9 +807,10 @@ m.Completions.create = lambda self, *a, **kw: (CAPTURED.append(kw), (_Stop(),))[
 - 并发的第二个客户端撞上正在生成的 runner 可能把 llama-server 打僵（ollama ps 空但
   进程占着 12GB 显存），表现为 "model runner has unexpectedly stopped"。自愈逻辑已覆盖
   开机路径；运行中若再遇到，手动杀 llama-server 再重跑 guard 即可。
-- 每次开机会自动跑一轮完整分析（~15-20 分钟，会真实下单）。只想启服务不跑分析：
-  把 vbs 里的 `start_local_stack.ps1` 换成 `start_ollama_only.ps1`，或直接手动
-  `ollama serve`。
+- ~~每次开机会自动跑一轮完整分析（~15-20 分钟，会真实下单）~~ **2026-10-03 起不再下单**：
+  分析流水线已改为只出建议（第十六节），跑一轮仍约 15-20 分钟，但不会再改持仓。
+  只想启服务不跑分析：把 vbs 里的 `start_local_stack.ps1` 换成 `start_ollama_only.ps1`，
+  或直接手动 `ollama serve`。
 
 ### 14.5 不用时自动卸载模型（9/27 追加，已实测）
 两层保障，均无需人工干预：
@@ -780,3 +873,209 @@ m.Completions.create = lambda self, *a, **kw: (CAPTURED.append(kw), (_Stop(),))[
   显式空 actions 列表仍表示"本轮无动作"。
 - 文档：README.md 重写为当前架构（本地 Ollama、自启链、15:35 计划任务、跑完自动
   卸载、.env 键位、测试入口）；`.env.example` 同步为本地 Ollama 默认 + 云端备选注释。
+
+## 十六、分析流水线改为"只出建议、不落盘"（2026-10-03）
+
+### 16.1 用户拍板的事项
+
+第 10.4 节挂了两周的那条决策（调仓智能体在"分析"过程中直接下单改持仓）已由用户拍板：
+**改为只出建议**。此前每跑一次日报，LLM 都可能真的动持仓——`result_latest.md`（10-02 15:47）
+的"三、已执行操作"里就写着"清仓徐工机械（000425）卖出 600股 @7.20元 ✅"，
+run6 更有 4 次 `execute_sell`。计划任务每交易日 15:35 自动跑，等于把不可逆写操作
+交给了一个每天自动运行的 LLM 工具循环。
+
+### 16.2 改动
+
+| 位置 | 改动 |
+|------|------|
+| `crew.py` 新增 `build_agents()` | 七个 agent 的装配（工具白名单 + `max_iter`）从 `run_daily_analysis` 里抽成模块级函数 |
+| `crew.py` trader | `get_trade_tools()` → `[view_portfolio, position_size, stop_loss_advice, risk_reward] + notify` |
+| `crew.py` rebalancer | `get_trade_tools()+get_risk_tools()` → `[view_portfolio, stop_loss_advice] + notify` |
+| `tasks.py` 交易任务 | 删掉"每只股票至多再调一次 set_stop_loss"，改为显式声明"只输出计划，不执行任何交易" |
+| `tasks.py` 调仓任务 | "谨慎执行明确的止损/止盈操作" → 逐只输出建议动作 + 触发条件 + 建议股数；`expected_output` 去掉"已执行的操作" |
+| `dry_run_offline.py` | 改为调用 `crew.build_agents()`，并打印全部 7 个 agent 的工具 + 断言无写操作工具 |
+| `tests/test_stock_crewai.py` | 新增 `TestAgentToolWhitelist`（3 个用例），把这条不变量锁进测试 |
+
+通知类工具（`wechat_notify` / `dashboard_notify`）**原样保留**——是否关掉自动推送是另一个
+待决事项，本次没有一并改。
+
+### 16.3 顺带修掉的两处"文档说改了、代码其实没改"
+
+1. **`dry_run_offline.py` 从来验不出工具集回归**：它自己按默认全量工具重建七个 agent，
+   与 `crew.py` 的实际传参是两份代码。9/26 情绪工具那次（文档说禁用、代码还挂着 3 个）
+   正是这个形状。现在干跑直接调 `crew.build_agents()`，两边不可能再分叉。
+2. **交易任务提示词引用了一个 agent 根本没有的工具**：`tasks.py` 要求"position_size 每只
+   股票最多调用一次"，但 `TraderAgent` 的默认工具集是 `get_trade_tools()+get_notify_tools()`，
+   里面没有 `position_size`。模型只能凭空编股数。现已把 `PositionSizeTool` 真的给到交易员。
+
+### 16.4 保留的写操作
+
+`crew.py:81` 的 `pt.refresh_position_prices()` 仍会写 `portfolio.json`——它只刷新持仓
+`last_price`（报告里的盈亏与 VaR 依赖它），不产生成交、不改股数与成本，不属于"下单"。
+`pt.check_stop_loss()` 经核查只读不写。`history/trades_*.json` 与 `recommendation_tracker`
+的落盘不受影响（后者记的是"推荐"而非"成交"）。
+
+### 16.5 验证（三层，端到端实跑已做）
+
+1. **回归测试**：`pytest tests/ -q` → **56 passed**（`TestAgentToolWhitelist` 3 例锁白名单、
+   `TestAgentTradingGate` 5 例锁总开关）。`built_agents` fixture 用 class 级作用域，
+   全套耗时 85s → 32s。
+2. **离线干跑**：`dry_run_offline.py` → 七个 agent 工具集逐条打印，`写操作工具泄漏 -> 无`；
+   数据层 10/10、`PE=`/`PB=` 各 10、峰值 prompt 估算 5600 token（与改动前一致）。
+3. **端到端实跑（10/3 22:47–23:02，`crew_run10.log` / `crew_run10.err`，15 分钟）**——
+   这是"删掉工具 + 改提示词"之后第一次真跑，也是周一计划任务之前的预演。结果：
+
+   | 判据 | 实测 |
+   |---|---|
+   | 任务完成数 | `Task Completed` **7 / 7** |
+   | 假成功标记 | `Maximum iterations reached` / `absolute best final answer` 命中 **0** |
+   | 模型是否还试图下单 | 日志里 `advice_only` / `被拒` 命中 **0**（工具根本不在集合里，模型没去够） |
+   | 持仓不变量 | 跑前跑后 `cash 47705.0` 与四只持仓的 `shares/avg_cost/stop_loss/take_profit` **完全一致**；只有 `last_price`/`last_price_time` 刷新（16.4 允许） |
+   | 写入时机（更强的证据） | 取证时 `portfolio.json` 的 mtime 停在 **22:48**（即 `[1/8] 准备市场数据` 那一次 `refresh_position_prices`），而流水线一直跑到 **23:02**。后半程 14 分钟没有任何一次写盘 = 交易/风控/调仓三个阶段一次都没碰过持仓文件。（这条只能看当时的 mtime 或日志，事后不能再拿 mtime 复查——后续任何一次运行都会重刷它。） |
+   | 报告文案 | `result_latest.md` 标题变为"动态调仓**建议**报告（2026-10-03）"，逐只持仓为「建议动作 + 触发条件 + 建议股数 + 理由」，全文 **0 处**"已执行"表述 |
+   | 收尾 | `ollama stop` 后 `ollama ps` 为空，显存已归还 |
+
+   对照旧行为：10-02 那份日报里有"已执行操作 … 清仓徐工机械（000425）—— 已执行 ✅ 卖出 600股 @ 7.20元"，
+   且 `portfolio.json` 当场从 5 只/现金 43385 变成 4 只/47705。这一版没有也不会再有。
+
+   > 跑前备份：旧日报存在 git 对象 `8bf9cc92dfc660d68fe6a6e042a7ac19dbfe7b1e`
+   > （`git cat-file blob 8bf9cc92… > result_latest.md` 可取回），
+   > 以及 `logs/result_pre-advice-gate.log`（`*.log` 被 gitignore，不污染工作树）。
+   > 注意 `result_latest.md` 每次运行整体覆盖、无归档目录，所以动手跑之前先这样备份一次。
+
+### 16.6 第二条下单路径已堵：`ALLOW_AGENT_TRADING` 总开关（2026-10-03）
+
+`crew.py` 不是唯一能下单的入口。`workflows/daily_analysis.py` 用 `core/orchestrator.py`
+直接注册 `TraderAgent()` 等真实 agent，走的是 `AgentBase.run()` 这条**旧编排路径**，
+而 `TraderAgent.run()` / `PortfolioRebalancerAgent.run()` 内部会
+`call_tool("execute_buy"/"execute_sell"/"set_stop_loss")`——`agents/*.py` 里
+`self.tools = get_trade_tools() + ...`。触发它的入口有两个：`main.py`（`--scheduler`
+会起 `core/scheduler.py`，其 `run_daily_analysis()` 就是调这个 workflow）和
+`web_dashboard.py` 的 `/api/run_workflow`。自动链路不受影响（本机只有一个计划任务
+`stock-crewai-daily-run`，`Get-ScheduledTask` 实测，它经 `run_crew_scheduled.vbs` →
+`run_crew_then_release.py` 拉的是 `crew.py`；仓库里没有任何 `.ps1`/`.vbs`/`.bat`
+引用 `main.py` 或 `web_dashboard.py`），但手动跑一样会真下单。
+
+**处理方式**：在 `tools/trade_tools.py` 三个写工具的 `_run()` 入口加总开关
+`trading_allowed()`——读环境变量 `ALLOW_AGENT_TRADING`，只有 `1/true/yes/on`
+（大小写与首尾空格不敏感）才放行，**默认拒绝**并返回
+`{"success": false, "advice_only": true, "error": "... Set ALLOW_AGENT_TRADING=1 ..."}`，
+同时 `logger.warning` 一行（拒绝不能是静默的）。三个工具的 `description` 也拼上了
+`_GATE_NOTE`，万一它们又被塞回某个 LLM 的工具集，模型能提前知道默认只会拒绝，
+不至于反复重试烧光 `max_iter`。
+
+选这条路而不是改 `agents/*.py` 的 `self.tools`，是因为：
+- `run_virtual_v4.py` 的模拟盘下单**直接调 `portfolio_tracker`**（`:454` 的
+  `pt.set_stop_loss`、自带的 `execute_sell`/`execute_buy` 函数），不经过 `tools/trade_tools.py`，
+  所以总开关不会误伤模拟盘；
+- 改 `self.tools` 会连带改掉 `main.py` 自检打印的工具计数，且 `AgentBase.run()` 里
+  `call_tool` 找不到工具是抛异常而不是返回失败，改动面更大。
+
+调用方对拒绝的降级行为已核查：`portfolio_rebalancer.py:102/120` 与 `trader.py:108`
+都是 `if buy_data.get("success")` 才记账，拿到 `success=false` 就跳过，不会抛异常。
+
+**验证**（evidence: `tests/test_stock_crewai.py::TestAgentTradingGate`，5 个用例）：
+- `trading_allowed()` 的真值解析：`1/true/YES/" on "` → True；`0/false/""/2`/未设 → False。
+- 默认配置下三个工具全部返回 `success=false, advice_only=true`，且临时 `portfolio.json`
+  的 `positions`/`cash` 分毫未动。
+- `ALLOW_AGENT_TRADING=1` 时 `execute_buy` 正常成交（100 股 @10 → 现金 100000→99000）。
+- **旧编排路径整条跑一遍**：给一个持有 000425 六百股（成本 8.0、现价 7.0，够到止损条件）
+  的组合 + 一个风控已通过的买入候选，直接调 `TraderAgent().run()` 与
+  `PortfolioRebalancerAgent().run()`，结果 `portfolio.json` 哈希前后一致、
+  `get_trade_history()` 为空。日志可见 `[trade] execute_buy 被拒` 与
+  `[Trader] buy failed: ... execute_buy refused`。
+
+全套测试 **56 passed**（16.2 时是 51）。`.env.example` 已补 `ALLOW_AGENT_TRADING`
+段落说明；`.env` 未设该键，即当前为只出建议模式。
+
+### 16.7 顺带查出的旧路径 bug（未修，需拍板）
+
+`PortfolioRebalancerAgent.run()` 第 46 行把 `view_portfolio` 的返回当字典用：
+`portfolio.get("holdings", [])`。但 `ViewPortfolioTool._run()` 返回的是
+`{"summary": <字符串>}`（`pt.get_portfolio_summary()` 拼的是多行文本，不是结构体），
+所以 `holdings` 永远取不到 → 第 48-53 行直接返回
+`{"action": "NO_ACTION", "reason": "无持仓，无需调仓"}`。
+
+16.6 的验证里复现了：组合明明持有 600 股，旧路径的调仓仍报"无持仓"。
+**影响面仅限旧编排路径**（`workflows/daily_analysis.py` / `main.py` / `web_dashboard.py`）；
+`crew.py` 走的是 LLM 直接读工具返回的文本，不受影响。
+
+要修就得让调仓拿到结构化持仓——要么给 `ViewPortfolioTool` 加一个返回原始
+`positions` 的字段，要么让 `run()` 直接调 `pt.load_portfolio()`。但这会让旧路径
+第一次真正开始产出调仓动作（此前一直是空转），属于行为变更，没有顺手改。
+
+## 十七、交接清单（2026-10-03 23:15）
+
+### 17.1 一句话状态
+
+七智能体端到端**已跑通并自动化**（计划任务每交易日 15:35 出 `result_latest.md`），
+本地 `qwen3.8-gsq-rco-iq3s` 路线，测试 56 例全绿。本轮把"分析过程真改持仓"这个
+遗留了两周的风险彻底关掉：两道防线 + 两组回归测试 + **一次 15 分钟端到端实跑取证**
+（10/3 22:47–23:02，7/7、0 假成功、持仓逐字段未变，见 16.5）。
+
+### 17.2 本轮改了哪些文件
+
+| 文件 | 改了什么 |
+|---|---|
+| `crew.py` | 新增 `build_agents()`（七 agent 装配的唯一入口）；交易员/调仓师工具白名单剔除 `execute_buy`/`execute_sell`/`set_stop_loss`，并给交易员补上 `position_size` |
+| `tasks.py` | 交易任务删掉 `set_stop_loss` 指令、加"只输出计划不执行"；调仓任务整段改为出建议，`expected_output` 去掉"已执行的操作" |
+| `tools/trade_tools.py` | 新增 `trading_allowed()` 总开关（默认拒绝）与 `_refusal()`；三个写工具 `_run()` 首行拦截；`description` 拼 `_GATE_NOTE` |
+| `dry_run_offline.py` | 改为调 `crew.build_agents()`；打印全部七 agent 工具集；对写操作工具做断言 |
+| `tests/test_stock_crewai.py` | 新增 `TestAgentToolWhitelist`（3 例）+ `TestAgentTradingGate`（5 例） |
+| `.env.example` | 补 `ALLOW_AGENT_TRADING` 段落 |
+| `HANDOVER.md` | 头部与第六节改成本地 Ollama 现状（新增 6.1：num_ctx 校准脚本越界改写无关模型）；10.4/11.6/12.5/14.4 四处"待用户拍板/会真实下单"改为已落地；新增第十六、十七节；命令速查整段重写；16.5 补端到端实跑取证 |
+| `result_latest.md` | 被 10/3 23:02 那次实跑整体覆盖（旧版备份见 16.5 末尾） |
+
+`.env` 本身**没改**（仍不含 `ALLOW_AGENT_TRADING`，即默认只出建议）。
+`portfolio.json` 全程只有 `last_price` / `last_price_time` 被刷新（16.4 允许的那条路径），
+`cash 47705.0` 与四只持仓的 `shares/avg_cost/stop_loss/take_profit`
+在干跑与实跑前后**逐字段一致**（基线见速查第 5 条）。
+
+### 17.3 接手后怎么确认我没骗你
+
+```powershell
+cd D:\aishare\repo\stock-crewai-master
+$py = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
+& $py -u -m pytest tests/ -q        # 56 passed
+& $py -u dry_run_offline.py          # 必须出现「写操作工具泄漏 -> 无」
+Select-String -Path crew.py,tools\trade_tools.py -Pattern "build_agents|trading_allowed"
+# 本轮实跑取证（16.5）：Task Completed 应为 7，假成功与 advice_only 都应为 0
+Select-String -Path crew_run10.log -Pattern "Task Completed" -AllMatches | Measure-Object
+Select-String -Path crew_run10.log -Pattern "Maximum iterations reached|absolute best|advice_only|被拒"
+```
+
+> Git Bash 下 `schtasks /query /tn …` 的 `/tn` 会被 MSYS 当路径吃掉
+> （报"找不到 D:/Program Files/Git/query"）。加 `MSYS_NO_PATHCONV=1` 前缀或在 PowerShell 里跑。
+
+### 17.4 三件未决事项（都要用户拍板，别擅自改）
+
+1. **旧编排路径的调仓永远报"无持仓"**（16.7）。`PortfolioRebalancerAgent.run()` 按
+   `portfolio.get("holdings")` 读 `view_portfolio`，而后者返回 `{"summary": <字符串>}`。
+   影响面仅 `workflows/daily_analysis.py` / `main.py` / `web_dashboard.py`。
+   修它 = 让一条一直空转的路径第一次真产出动作，是行为变更。
+2. **微信推送仍开着**。`crew.py:notify_wechat()` 走 `openclaw`（在 PATH 上），
+   交易员/调仓师还带着 `wechat_notify`/`dashboard_notify`。本轮只处理"写持仓"这类副作用，
+   通知类是有意保留的。要关就两处一起处理，否则只关一处等于没关。
+3. **`start_local_stack.ps1` 的 num_ctx 校准作用域过大**（6.1）。它扫描全部参数 blob
+   并改成 16384，10/2 已实测把一个无关模型 `q38-lite` 的 `{"num_ctx":8192,"num_gpu":56}`
+   静默改成了 `{"num_ctx":16384}`（连 `num_gpu` 一起丢了）。现在无故障，导入新模型时会被改。
+
+### 17.5 这个仓库特有的坑（按杀伤力排序）
+
+1. **不要用 Write/Edit/Bash 往任何文件里写密钥**：入参里形似密钥的串落盘前会被替换成
+   `前4…后4`（`…` 是字面 U+2026），`Read` 会把显示层还原，看起来完整其实只剩 11 字节。
+   判据只有量字节。密钥一律由用户本人粘贴。
+2. **`dry_run_offline.py` 之类"验证脚本"必须调被测代码的同一入口**。它此前自建 agent
+   副本，导致工具集回归一路验不出来（9/26 情绪工具、10.3 position_size 都是同一形状）。
+   新加验证脚本时先问：它验的那份配置，和生产代码是同一个来源吗？
+3. **Python 必须用 3.12 且必须加 `-u`**：`$env:LOCALAPPDATA\Programs\Python\Python312\python.exe`。
+   不加 `-u` 日志会长时间 0 字节。
+4. **`L2/L3` 安全扫描在本机是关的**（`security-scan-settings.cmd` 回 `l2_enabled=false,
+   l3_enabled=false`，host `qoder_sdk`）。被选中某个模式 ≠ 该模式已开启；
+   没跑过的工序不能说成跑过，也不能说"没发现问题"。
+5. **改 `.ps1` 必须保留 UTF-8 with BOM**（14.6 坑 1），否则 PowerShell 5.1 按 GBK 误读，
+   中文注释会把紧随其后的可执行行啃坏。
+6. **Ollama 只用 `ollama serve`，永远别启托盘**（13.3：托盘会把版本自动升回 0.34.4 打挂推理）。
+7. **终端回显中文会乱码**（cp936 / UTF-16LE 都救不回来）。要判断结果就让脚本只输出 ASCII，
+   或写文件后用 Read 看。16.6 那两条被拒日志就是靠 ASCII 字段（`advice_only=true`）而非
+   中文正文确认的。

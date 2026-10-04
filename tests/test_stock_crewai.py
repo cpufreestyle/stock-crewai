@@ -197,5 +197,178 @@ class TestNetValueHistory:
         assert isinstance(NET_VALUE_HISTORY_FILE, str)
 
 
+class TestAgentToolWhitelist:
+    """分析流水线不得携带下单类工具
+
+    execute_buy / execute_sell / set_stop_loss 会真改 portfolio.json 与
+    history/trades_YYYYMM.json。让 LLM 在"出日报"的过程中自己决定下不下单，
+    等于每跑一次分析就改一次持仓（run6 实测有 4 次 execute_sell）。
+    下单只应存在于 run_virtual_v4.py 那条独立的模拟盘路径。
+    """
+
+    WRITE_TOOLS = {"execute_buy", "execute_sell", "set_stop_loss"}
+
+    @pytest.fixture(scope="class")
+    def built_agents(self):
+        # get_llm() 在 key 缺失时返回 None 并让 create_crewai_agent 抛错；
+        # 这里只需要装配期的工具白名单，塞假值即可，不会发起任何网络请求。
+        # class 级：装一次 7 个 agent 要几十秒，别每个用例重建。
+        mp = pytest.MonkeyPatch()
+        mp.setenv("OPENAI_API_KEY", "test-key")
+        mp.setenv("OPENAI_BASE_URL", "http://127.0.0.1:1/v1")
+        mp.setenv("MODEL_NAME", "test-model")
+        try:
+            import crew
+            return crew.build_agents()
+        finally:
+            mp.undo()
+
+    def test_no_write_tools(self, built_agents):
+        leaks = {
+            name: self.WRITE_TOOLS & {t.name for t in agent.tools}
+            for name, agent in built_agents.items()
+        }
+        leaks = {k: v for k, v in leaks.items() if v}
+        assert not leaks, f"分析流水线携带了下单类工具: {leaks}"
+
+    def test_all_seven_agents_built(self, built_agents):
+        assert set(built_agents) == {
+            "market_watcher", "researcher", "risk_mgr", "trader",
+            "sentiment_analyst", "backtest_validator", "rebalancer",
+        }
+
+    def test_trader_can_size_positions(self, built_agents):
+        # 交易任务提示词要求用 position_size 定股数；工具缺席时模型只能凭空编。
+        names = {t.name for t in built_agents["trader"].tools}
+        assert "position_size" in names
+        assert "view_portfolio" in names
+
+
+class TestAgentTradingGate:
+    """下单类工具总开关：默认拒绝，ALLOW_AGENT_TRADING=1 才放行
+
+    crew.py 已在工具白名单层面剔除这三个工具，但 workflows/daily_analysis.py 走
+    AgentBase.run() 旧编排路径，agents/*.py 的 self.tools 仍含 get_trade_tools()。
+    手动跑 main.py 或点 web_dashboard 一样会真下单，所以工具入口再兜一道。
+    """
+
+    @pytest.fixture
+    def tmp_portfolio(self):
+        import shutil as _shutil
+        import tempfile
+
+        import portfolio_tracker as pt
+
+        tmp = tempfile.mkdtemp()
+        orig_file, orig_dir = pt.PORTFOLIO_FILE, pt.HISTORY_DIR
+        pt.PORTFOLIO_FILE = os.path.join(tmp, "portfolio.json")
+        pt.HISTORY_DIR = os.path.join(tmp, "history")
+        pt.save_portfolio({"positions": {}, "cash": 100000,
+                           "total_capital": 100000, "created": "2026-01-01T00:00:00"})
+        try:
+            yield pt
+        finally:
+            pt.PORTFOLIO_FILE, pt.HISTORY_DIR = orig_file, orig_dir
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_truthy_parsing(self, monkeypatch):
+        from tools.trade_tools import trading_allowed
+        for val, expected in [("1", True), ("true", True), ("YES", True), (" on ", True),
+                              ("0", False), ("false", False), ("", False), ("2", False)]:
+            monkeypatch.setenv("ALLOW_AGENT_TRADING", val)
+            assert trading_allowed() is expected, val
+        monkeypatch.delenv("ALLOW_AGENT_TRADING", raising=False)
+        assert trading_allowed() is False
+
+    def test_default_denies_all_three(self, monkeypatch, tmp_portfolio):
+        monkeypatch.delenv("ALLOW_AGENT_TRADING", raising=False)
+        from tools.trade_tools import ExecuteBuyTool, ExecuteSellTool, SetStopLossTool
+
+        calls = [
+            (ExecuteBuyTool(), {"code": "000001", "name": "测试股", "price": 10.0, "shares": 100}),
+            (ExecuteSellTool(), {"code": "000001", "price": 10.0, "shares": 100}),
+            (SetStopLossTool(), {"code": "000001", "stop_loss": 9.0, "take_profit": 12.0}),
+        ]
+        for tool, kwargs in calls:
+            r = json.loads(tool._run(**kwargs))
+            assert r["success"] is False, tool.name
+            assert r["advice_only"] is True, tool.name
+
+        # 拒绝必须是真拒绝：持仓与现金一个字都不能动
+        p = tmp_portfolio.load_portfolio()
+        assert p["positions"] == {}
+        assert p["cash"] == 100000
+
+    def test_gate_open_allows_buy(self, monkeypatch, tmp_portfolio):
+        monkeypatch.setenv("ALLOW_AGENT_TRADING", "1")
+        from tools.trade_tools import ExecuteBuyTool
+
+        r = json.loads(ExecuteBuyTool()._run(
+            code="000001", name="测试股", price=10.0, shares=100, reason="gate-test"))
+        assert r["success"] is True
+        p = tmp_portfolio.load_portfolio()
+        assert p["positions"]["000001"]["shares"] == 100
+        assert p["cash"] == 99000
+
+    def test_descriptions_advertise_the_gate(self):
+        from tools.trade_tools import ExecuteBuyTool, ExecuteSellTool, SetStopLossTool
+        for tool in (ExecuteBuyTool(), ExecuteSellTool(), SetStopLossTool()):
+            assert "ALLOW_AGENT_TRADING" in tool.description, tool.name
+
+    def test_legacy_orchestrator_path_cannot_trade(self, monkeypatch, tmp_portfolio):
+        """旧编排路径（AgentBase.run）整条跑一遍也不许动持仓
+
+        crew.py 走的是 create_crewai_agent，工具白名单已经剔掉写工具；但
+        workflows/daily_analysis.py + core/scheduler.py + web_dashboard.py 走的是
+        agents/*.py 里 self.tools = get_trade_tools()+... 这条老路，只能靠工具入口的
+        总开关拦。这里直接调 run()，覆盖 trader 的 execute_buy/set_stop_loss 与
+        rebalancer 的 execute_sell。
+        """
+        monkeypatch.delenv("ALLOW_AGENT_TRADING", raising=False)
+
+        tmp_portfolio.save_portfolio({
+            "positions": {"000425": {"name": "测试持仓", "shares": 600, "avg_cost": 8.0,
+                                     "last_price": 7.0, "stop_loss": 0, "take_profit": 0}},
+            "cash": 50000, "total_capital": 100000, "created": "2026-01-01T00:00:00",
+        })
+
+        class _State:
+            def get_market_state(self):
+                return {"regime": "熊市", "should_trade": True, "position_pct": 50}
+
+            def get_trade_plan(self):
+                return {}
+
+            def get_stock_picks(self):
+                return []
+
+            def get_risk_assessment(self):
+                # 深度亏损的持仓 + 一个风控已通过的买入候选，两边都够到写工具的触发条件
+                return {"passed_picks": [{"code": "000001", "name": "测试买入", "price": 11.0,
+                                          "shares": 100, "stop_loss": 10.0, "take_profit": 13.0,
+                                          "score": 80, "rationale": "t"}]}
+
+            def set_rebalance_plan(self, data):
+                self.plan = data
+
+            def set_trade_plan(self, data):
+                self.trade_plan = data
+
+        from agents.trader import TraderAgent
+        from agents.portfolio_rebalancer import PortfolioRebalancerAgent
+
+        trader_out = TraderAgent().run({}, _State())
+        assert trader_out.success is True
+        rebalancer_out = PortfolioRebalancerAgent().run({}, _State())
+        assert rebalancer_out.success is True
+
+        p = tmp_portfolio.load_portfolio()
+        assert p["cash"] == 50000
+        assert set(p["positions"]) == {"000425"}
+        assert p["positions"]["000425"]["shares"] == 600
+        assert p["positions"]["000425"]["avg_cost"] == 8.0
+        assert tmp_portfolio.get_trade_history() == []
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
