@@ -2945,3 +2945,76 @@ error 早退、前 8 截断、缺 `代码` 跳过、`technical_analysis` 非 dic
 - 至此 `agents/` 目录下 4 个 `run()`（`researcher` / `trader` / `rebalancer` /
   `backtest_agent`）与 `sentiment_agent.run()` 全部完成精简；`agents/` 已无 ≥70 行函数。
 
+## 49. performance_report.generate_report 拆分为五个打印段
+
+- 提交：`见本节 sync`（本文档追加后一并提交）
+- 目标：`performance_report.py:13 generate_report()` 104 行 → 11 行，
+  只保留「取 portfolio → 五段顺序调用」的编排职责。
+
+### 49.1 拆分结果（AST 实测行数）
+
+| 函数 | 行数 |
+|---|---|
+| `generate_report` | 11 |
+| `_print_report_header` | 5 |
+| `_print_basic_info` | 11 |
+| `_print_positions` | 21 |
+| `_print_trade_history` | 56 |
+| `_print_risk_disclaimer` | 10 |
+
+### 49.2 拆分原则
+
+- 五个 helper 全部为**模块级函数**，不用嵌套、不用闭包。
+- 原三层嵌套 `if/else` 改为**早退扁平结构**（空 positions / 无 history / 空 history 早退）。
+- `_print_positions(portfolio)` 显式传参；其余四段均无外部输入，保持零参数。
+- 打印文案、`f-string` 格式、`"=" * 60` 分隔线**逐字保留**。
+- 本次只做函数拆分，不夹带任何其他行为改动。
+
+### 49.3 等价性实测（_t11.py，34/34 全一致）
+
+- 方法：`git show HEAD:performance_report.py` 导旧版到根目录 `_pr_old.py`，
+  `spec_from_file_location` 双加载新旧两版；`pt` / `datetime` 用假对象打桩，
+  对比**完整 stdout 逐字节相等**。
+- 覆盖场景：空 portfolio、缺 `total_value` / `cash` / `total_capital` 键、
+  盈亏平三档（正 / 负 / 0）、负值 / 巨值 / 微值、无 history 属性、空 history 目录、
+  畸形 json、非 list json、嵌套目录文件、csv 文件被忽略、3 文件合并排序、
+  只取最新 3 个文件、只取最后 10 笔、`.get` 默认值、
+  position 缺 `name` / `avg_cost=0` / `shares=0`、trade 缺字段 / 坏日期 / 短日期 /
+  非 ascii 名 / 非数字 pnl / 零 pnl 等。
+- 结果：`=== 34/34 一致 ===`。
+
+### 49.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `compileall performance_report.py` | CE=0 |
+| `pytest tests/ -q` | **125 passed** |
+| 等价性脚本 | 34/34 stdout 全等 |
+
+### 49.5 说明
+
+- 旧版里 `cost = pos["avg_cost"] * pos["shares"]` 是一行算了但从未使用的死变量，
+  重写 `_print_positions` 时未将其搬入（diff 可见该行被删除）。这是行为等价的删除：
+  `profit` 只依赖 current / avg_cost / shares，不使用 cost；等价性 34 场景
+  （含 `avg_cost=0`、`shares=0`、负值）已覆盖该行原本可能触发的所有除零路径。
+- `_print_trade_history` 里的「最新 3 个文件 / 最后 10 笔」排序与截断逻辑
+  原样搬入，未做任何优化，避免改变边界行为。
+- 本次拆分后 `performance_report.py` 已无超过 60 行的函数；
+  core / agents / web_dashboard 等模块的剩余候选见 49.6。
+
+### 49.6 复扫剩余的 ≥70 行函数
+
+| 函数 | 行数 |
+|---|---|
+| `web_dashboard.py:133 api_dashboard` | 96 |
+| `run_virtual_v4.py:433 execute_buy` | 91 |
+| `data_sources/quotes.py:28 get_realtime_quotes` | 87 |
+| `llm_analyst.py:139 generate_trading_signal` | 80 |
+| `run_virtual_v4.py:143 check_portfolio_risk` | 78 |
+| `main.py:134 _run_framework_test` | 78 |
+| `llm_analyst.py:59 analyze_sentiment_news` | 78 |
+| `workflows/realtime_monitor.py:38 check_stop_loss_take_profit` | 72 |
+| `data_sources/kline_prices.py:31 get_stock_price` | 70 |
+
+- 下一个候选：`web_dashboard.py:133 api_dashboard`，纯 HTTP 响应组装，
+  可按「取数 / 算指标 / 组 JSON」拆三段；注意其带路由装饰器（教训见 43.5）。
