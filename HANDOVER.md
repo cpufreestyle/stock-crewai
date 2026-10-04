@@ -1298,3 +1298,45 @@ run_virtual_v4.py：713 -> 648 行（两轮共减 65 行，且减掉的都是有
 剩下的 648 行是 wiring 与 I/O（run_once / main / execute_buy / execute_sell / advanced_filter），
 继续拆收益递减，且 execute_* 动到真实下单，要进一步拆得先给它们补集成级测试。
 
+
+
+## 二十三、循环依赖审计 + 清掉第三套缓存（2026-10-05）
+
+### 23.1 模块依赖图审计
+
+用 AST 建 import 图跑环检测：**循环依赖 0 个**，依赖方向是干净的。
+fan-in 排名（被多少模块 import）：tools 17、core 14、data_fetcher 13、
+portfolio_tracker 11、agents 8、api_cache 7、config 5、backtest 4。
+另外确认了 data_sources 拆分没有被绕过：全仓只有 data_fetcher.py 一个门面引用它，
+没有调用方直接 import 子模块。
+
+### 23.2 tools/compat.py 的死分支（af5e914）
+
+compat.py 原本是“装了 crewai 就用原生 BaseTool，否则用 pydantic 兜底”。
+实测 compat.BaseTool is crewai.tools.BaseTool 为 True，且 crewai 是硬依赖
+（crew.py:8 与 tasks.py:5 在模块层无条件 import，requirements.txt 也声明了），
+所以兜底分支永远走不到。改成纯再导出，5 个工具模块的 import 一行没动。
+
+顺带发现 core/agent_base.py:187 也有一句“crewai not installed, using fallback”，
+但它 return None 会改变函数契约，且窟窿比 compat 大，本轮**故意没动**，只记录。
+
+### 23.3 web_dashboard 复用 TTLCache（ad07400）
+
+dashboard 里手写了一份 _cache dict + 30s TTL，这是仓库里第三套缓存实现
+（前两套是 api_cache.TTLCache 和各处的 cached 装饰器）。
+改成复用 TTLCache。难点：调用方要区分“命中但值为 None”和“未命中”，
+而 TTLCache.get 两者都返回 None；保持 (value, hit) 签名不变，
+未命中统一 hit=False，5 个调用点零改动。
+已实测 miss/hit/过期三种路径行为与改造前一致。
+
+### 23.4 补 dashboard 路由测试
+
+补 7 个用例：/api/health、/api/scheduler_status、/api/agent_status、
+/api/agent_events、/api/agent_state/<不存在的key>、/ 首页渲染、缓存 helper。
+用 Flask test_client，不起服务不碰网络，同时给 23.3 的改动兜底。
+
+### 23.5 数字
+
+测试数 107 -> 114。web_dashboard.py 现在有路由级覆盖，
+下一步要动它的 20 个 handler 已经有安全网了。
+
