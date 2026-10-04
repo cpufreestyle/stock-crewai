@@ -2,16 +2,19 @@
 import sys; sys.stdout.reconfigure(encoding='utf-8')
 import requests
 import json
+import os
 from datetime import datetime
 
-# 企业微信 webhook 地址（需替换）
+# 企业微信 webhook 地址
 # 获取方式：企业微信后台 → 应用管理 → 自建应用 → 查看 Secret → 接收消息 → Webhook
-WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE"
+# 从环境变量 WECHAT_WEBHOOK_URL 读取（.env.example 已登记）；未配置时保持占位符，发送函数会跳过
+_PLACEHOLDER = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE"
+WEBHOOK_URL = os.getenv("WECHAT_WEBHOOK_URL", "").strip() or _PLACEHOLDER
 
 
 def send_text(content: str):
     """发送文本消息"""
-    if WEBHOOK_URL == "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE":
+    if not WEBHOOK_URL or WEBHOOK_URL == _PLACEHOLDER:
         print("[通知] Webhook未配置，跳过")
         return False
 
@@ -38,7 +41,7 @@ def send_text(content: str):
 
 def send_markdown(content: str):
     """发送Markdown消息"""
-    if WEBHOOK_URL == "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY_HERE":
+    if not WEBHOOK_URL or WEBHOOK_URL == _PLACEHOLDER:
         print("[通知] Webhook未配置，跳过")
         return False
 
