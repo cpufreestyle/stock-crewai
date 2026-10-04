@@ -96,48 +96,21 @@ class PerformanceAuditorAgent(AgentBase):
             if len(values) < 10:
                 return {"note": "有效数据不足"}
 
-            # 收益率序列
-            returns = []
-            for i in range(1, len(values)):
-                if values[i - 1] > 0:
-                    ret = (values[i] - values[i - 1]) / values[i - 1]
-                    returns.append(ret)
-
-            if not returns:
+            # 指标计算统一走 performance_metrics（与 run_virtual_v4 / backtest 共用一份实现）
+            from performance_metrics import compute_metrics
+            m = compute_metrics(values)
+            if m is None:
                 return {"note": "无法计算收益率"}
 
-            import numpy as np
-
-            # 年化收益（每天6次采样）
-            mean_ret = np.mean(returns) * 100
-            annual_ret = mean_ret * 252 * 6
-            annual_std = np.std(returns) * (252 * 6) ** 0.5 * 100
-
-            # 夏普比率
-            risk_free = 3.0
-            sharpe = (annual_ret - risk_free) / annual_std if annual_std > 0 else 0
-
-            # 最大回撤
-            peak = values[0]
-            max_dd = 0
-            for v in values:
-                if v > peak:
-                    peak = v
-                dd = (peak - v) / peak * 100
-                if dd > max_dd:
-                    max_dd = dd
-
-            # 胜率
-            win_rate = sum(1 for r in returns if r > 0) / len(returns) * 100
-
             return {
-                "sharpe_ratio": round(sharpe, 2),
-                "max_drawdown": round(max_dd, 2),
-                "annual_return": round(annual_ret, 2),
-                "annual_volatility": round(annual_std, 2),
-                "win_rate": round(win_rate, 1),
-                "data_points": len(values),
+                "sharpe_ratio": m["sharpe_ratio"],
+                "max_drawdown": m["max_drawdown"],
+                "annual_return": m["annual_return"],
+                "annual_volatility": m["annual_volatility"],
+                "win_rate": m["win_rate"],
+                "data_points": m["total_days"],
             }
 
         except Exception as e:
             return {"error": str(e)}
+
