@@ -1646,3 +1646,85 @@ CI 行为变更，需单独确认后再动。
 那是包内的 Jinja 模板，不是本仓库问题）。
 
 工作树现在只剩打算提交的 `.gitignore` 一行改动。
+
+
+## 三十、归档零引用死模块，并移除 tenacity 直接依赖（2026-10-05）
+
+
+
+### 30.1 归档的三个死模块
+
+
+
+用 AST 解析出全部 import / from-import 语句的目标模块名，再对候选逐个
+
+git grep 验证引用点（正则 grep 会漏多行 import 与字符串形式的导入），
+
+确认以下三个模块在本仓库范围内零引用：
+
+
+
+| 模块 | 行数 | 原用途 | 判定依据 |
+
+| --- | --- | --- | --- |
+
+| `retry_utils.py` | 27 | tenacity 重试装饰器 | 无任何 import 点，文档亦无引用 |
+
+| `signal_dedup.py` | 44 | `SignalDeduplicator` 单例去重 | 无任何 import 点 |
+
+| `strategy_momentum.py` | 343 | 未接线的 momentum 扫描器 | 无任何 import 点，web_dashboard 实际用的是 `strategy_rotation.py` |
+
+
+
+按仓库既有约定移入 `_quarantine/2026-10-05/dead-modules/`（归档而非删除），
+
+并在该目录写 README.md 说明判定过程。`_quarantine/` 被 gitignore，
+
+但 git mv 的 R 状态会在提交里留下移动痕迹，源文件在 git 历史中可随时取回。
+
+
+
+### 30.2 从 requirements.txt 移除 tenacity
+
+
+
+`retry_utils.py` 是唯一直接用到 tenacity 的模块。归档后本仓库不再直接
+
+依赖它，故删除 `tenacity>=8.2.0` 一行。删除前已确认 chromadb 与 instructor
+
+都以 tenacity 为传递依赖（pip show tenacity 的 Required-by 非空），
+
+运行时行为不受影响。
+
+
+
+同时把该 section 标题从「配置与重试」改为「配置」（已无重试类直接依赖项），
+
+框线补齐到与其余 section 一致的 60 字符宽度。
+
+
+
+### 30.3 验证证据
+
+
+
+- `compileall -q agents tests tools <根目录 .py>`：CE=0
+
+- `pytest tests/ -q`：125 passed, 22 warnings in 31.71s（与 29.4 基线一致，无回归）
+
+- `git diff -- requirements.txt`：仅注释行措辞调整加 tenacity 一行删除，无 CRLF 污染
+
+
+
+### 30.4 下一批候选（尚未验证，需逐个 git grep）
+
+
+
+`dry_run_offline.py`、`harness_guard.py`、
+
+`run_crew_then_release.py`、`warmup_llm.py`。
+
+已提前确认不是死代码：`llm_analyst.py` 被 `web_dashboard.py` 引用，
+
+`quant_metrics.py` 被 backtest / performance_metrics / web_dashboard 引用。
+
