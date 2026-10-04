@@ -6,9 +6,6 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import requests
-from datetime import datetime, timedelta
-from typing import List, Dict
 
 logger = logging.getLogger("tools.sentiment")
 

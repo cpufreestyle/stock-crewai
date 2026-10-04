@@ -10,9 +10,6 @@ sys.stderr.reconfigure(encoding='utf-8')
 
 import json
 import os
-import requests
-import re
-import time
 from datetime import datetime
 
 import portfolio_tracker as pt

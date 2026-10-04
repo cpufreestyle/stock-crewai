@@ -5,7 +5,6 @@ import json
 import os
 from datetime import datetime
 from typing import Dict, List
-import data_fetcher as df
 
 
 TRACKER_DIR = os.path.join(os.path.dirname(__file__), "recommendations")

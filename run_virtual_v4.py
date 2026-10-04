@@ -25,7 +25,6 @@ from datetime import datetime
 from pathlib import Path
 
 import portfolio_tracker as pt
-import risk_manager as rm
 import data_fetcher as df
 import logging
 from logging.handlers import RotatingFileHandler

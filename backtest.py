@@ -5,8 +5,6 @@ import os
 from datetime import datetime, timedelta
 
 import data_fetcher as df
-import portfolio_tracker as pt
-import risk_manager as rm
 
 
 def backtest_strategy(
