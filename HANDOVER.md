@@ -1442,3 +1442,60 @@ execute_buy 算仓位占比时写的是：
 测试数 114 -> 125。run_virtual_v4.py 的下单执行端（execute_buy / execute_sell）
 从零覆盖变成 11 个用例守着，加上此前的撤价 18 个，这条路径已有基本安全网。
 
+
+
+## 二十六、清理零引用的遗留启动脚本（2026-10-05）
+
+前面都在清 Python，这轮查启动脚本这类“也是代码”的东西。
+
+### 26.1 引用审计
+
+对 9 个 .ps1/.vbs/.bat/.sh 逐个查“除自身外还有谁引用”：
+
+| 脚本 | 外部引用 | 判定 |
+|------|----------|------|
+| run_crew_scheduled.vbs | 14 | 活，计划任务的动作 |
+| start_local_stack.ps1 | 4 | 活，开机自启守卫 |
+| ensure_run_schedule.ps1 | 3 | 活，注册/刷新计划任务 |
+| run_loop.bat | 2 | 活（Docker 栈，仅文档提及）|
+| start.sh | 2 | 活（Docker 栈）|
+| start-lm-studio.ps1 | 0 | 归档 |
+| check_api.ps1 | 0 | 归档 |
+| autostart.ps1 | 0 | 归档 |
+| start-stock-crewai.ps1 | 0 | 归档 |
+| harness-start.bat | 0 | 归档 |
+
+现行链路（未动）：stock-crewai-autostart.vbs -> start_local_stack.ps1 ->
+ensure_run_schedule.ps1 -> 计划任务 stock-crewai-daily-run ->
+run_crew_scheduled.vbs -> run_crew_then_release.py。
+
+### 26.2 归档的五个（bf43295）
+
+- start-lm-studio.ps1：启动 LM Studio 等 1234 端口。本地栈 9/26 已换 Ollama
+  （11434），无人调用。
+- check_api.ps1：探测 localhost:1234/v1/models，即 LM Studio 的端口，Ollama 路线下不适用。
+- autostart.ps1：登录时拉 Ollama + Docker + compose up。已被 start_local_stack.ps1
+  取代（后者还锁 cuda_v12、校准 num_ctx、注册 15:35 任务）。
+- start-stock-crewai.ps1：同时代另一个登录自启，功能与 autostart.ps1 重叠且依赖 Docker。
+- harness-start.bat：启 Claude Harness/Codex 开发环境 + harness_guard.py，
+  与交易流水线无关的开发期工具。
+
+归档到 _quarantine/2026-10-05/legacy-launchers/ 并附 README 说明各自由来，
+不直接删除以便回溯。
+
+### 26.3 验证
+
+- 计划任务 stock-crewai-daily-run 仍为 Ready，动作仍指向
+  D:\aishare\repo\stock-crewai-master\run_crew_scheduled.vbs（未动）；
+- start_local_stack.ps1 / ensure_run_schedule.ps1 / run_crew_scheduled.vbs /
+  run_crew_then_release.py 四个文件都在位；
+- 这两个 .ps1 通读过，每步都有注释说明原因，无死分支，未改；
+- compileall 干净，125 测试全过。
+
+### 26.4 根目录现状
+
+启动类只剩 4 个文件（2 个 ps1 + 1 个 vbs + run_crew_then_release.py），
+加上 Docker 那组（Dockerfile / docker-compose.yml / start.sh / run_loop.bat /
+run_virtual_v4.py / DOCKER.md）。此前那一堆 LM Studio、harness、API 探测的
+残留清完了。
+
