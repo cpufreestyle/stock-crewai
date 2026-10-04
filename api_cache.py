@@ -140,25 +140,6 @@ def cached(ttl: Optional[int] = None, cache_instance: Optional[TTLCache] = None)
 
 
 # 便捷函数：清理所有缓存
-def clear_all_caches() -> None:
-    """清理所有缓存"""
-    realtime_cache.clear()
-    market_cache.clear()
-    kline_cache.clear()
-    api_cache.clear()
-    print("✅ 所有缓存已清理")
-
-
-# 便捷函数：查看所有缓存统计
-def get_all_cache_stats() -> Dict[str, Dict[str, Any]]:
-    """获取所有缓存的统计信息"""
-    return {
-        'realtime': realtime_cache.stats(),
-        'market': market_cache.stats(),
-        'kline': kline_cache.stats(),
-        'api': api_cache.stats()
-    }
-
 
 if __name__ == '__main__':
     # 测试代码
