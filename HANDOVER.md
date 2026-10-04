@@ -1161,3 +1161,50 @@ Select-String -Path crew_run10.log -Pattern "Maximum iterations reached|absolute
 README 的测试数从 48 改成 56；目录树补 `data_sources/`；更新日志加 v4.4.0。
 历史条目里的 48 个测试保留原样（那是 9/27 当天的事实）。
 
+
+
+## 二十、依赖与配置精简，并修掉一个静默失败（2026-10-04 深夜）
+
+第十九节之后转向非代码部分的精简：依赖清单和配置项。两处都是真的会咬人的。
+
+### 20.1 requirements.txt 与实际 import 对齐（fd3e3ab）
+
+用 AST 扫全部 py 文件的顶层 import，与 requirements.txt 逐项对账：
+
+- 删掉 langchain-openai：全仓 langchain 出现 0 次，是 LM Studio/OpenAI 旧路线的残留；
+  本地 Ollama 走 crewai 的 OpenAI 兼容端点，不需要它。删后全模块 import 与 56 测试均通过。
+- 补上 9 个实际直接 import 却没声明的包：requests、pydantic、numpy、openai、tenacity、
+  filelock、python-dotenv（原已声明）、pytest 及 dev 工具链。这些目前靠 crewai 传递依赖顺带装上，
+  能跑纯属侥幸——crewai 一改依赖树就崩。
+- 按用途分段并加注释（LLM 编排 / 数据获取 / 结构化输出 / 配置重试 / Dashboard / 可选实盘 / dev）。
+
+### 20.2 删掉 12 个死配置项（3f64cc6）
+
+用正则查 config.py 里每个大写键在全仓的出现次数，refs==1（只有定义）即死。33 个键删掉 12 个：
+
+- CACHE_TTL_REALTIME / MARKET / KLINE：真正的 TTL 在 api_cache.py:97-100 硬编码
+  （10/300/60/30），改这里的值静默无效，是最容易骗人的一项。
+- API_BASE_URL：默认值还是 OpenRouter，而栈早已换本地 Ollama，纯误导。
+- TRADE_LOG_FILE：没有任何代码读它，真实文件名散落在调用处。
+- TECH_SCORE_WEIGHTS、MIN_TECH_SCORE：技术评分逻辑未接线，权重表是摆设。
+- NEAR_TAKE_PROFIT_PCT、STOP_LOSS_CHECK_ENABLED、ATR_STOP_LOSS_ENABLED、
+  ATR_HOLDING_DAYS、DASHBOARD_REFRESH_SECONDS：均无读取方。
+
+顺带修了 CIRCUIT_BREAKER 段与上方风险控制段之间丢了的空行（第十九节补常量时带进来的）。
+删后剩 22 个键，全部有真实读取方。
+
+### 20.3 修掉微信通知静默失败（81aaded）
+
+这条解释了 HANDOVER 里挂了很久的“通知走 openclaw 且设计上静默失败”。
+真实原因更简单也更蠢：wechat_notifier.py 把 webhook 地址硬编码成占位符，
+从不读环境变量。所以 .env.example 里登记的 WECHAT_WEBHOOK_URL 一直是无效配置——
+用户填了 key 也不会有任何通知，也不报错。
+
+改为 os.getenv('WECHAT_WEBHOOK_URL', '').strip() or _PLACEHOLDER，两条路径都实测过：
+未设置 -> 打印 Webhook未配置，跳过 并返回 False；已设置 -> 取到 env 值且不再被判为占位符。
+
+### 20.4 验证
+
+每个提交都单独跑：compileall 全仓、关键消费方 import（crew / circuit_breaker / run_virtual_v4 /
+web_dashboard / core.scheduler）、pytest tests/ -q 56 passed。
+
