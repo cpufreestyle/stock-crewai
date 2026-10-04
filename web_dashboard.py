@@ -137,82 +137,12 @@ def api_dashboard():
     current_prices = get_current_prices(stock_codes) if stock_codes else {}
     metrics = calculate_metrics(portfolio, current_prices)
 
-    # 历史净值
-    history_file = os.path.join(DATA_DIR, "net_value_history.json")
-    if os.path.exists(history_file):
-        with open(history_file, "r", encoding="utf-8") as f:
-            performance = json.load(f)
-    else:
-        performance = [{
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "value": portfolio.get("total_value", 100000),
-            "return_pct": portfolio.get("total_return_pct", 0),
-        }]
+    performance = _load_net_value_history(portfolio)
+    _append_today_record(performance, portfolio)
+    safe_save_json(_history_file(), performance)
 
-    # 自动更新今日净值（若不存在则追加）
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    today_record = None
-    for record in performance:
-        if record.get("date") == today_str:
-            today_record = record
-            break
-    
-    current_value = portfolio.get("total_value", 100000)
-    current_return = portfolio.get("total_return_pct", 0)
-    
-    if today_record:
-        # 更新今日记录
-        today_record["value"] = current_value
-        today_record["return_pct"] = current_return
-    else:
-        # 追加今日记录
-        performance.append({
-            "date": today_str,
-            "value": current_value,
-            "return_pct": current_return
-        })
-    
-    # 写回文件
-    # 走 safe_io 的持锁原子写：这里是 GET 路径上的读-改-写，
-    # 裸 open("w") 会在并发请求/auditor 同时写时把文件撕裂
-    # （portfolio.json 与 trades_*.json 都踩过，见 HANDOVER 9.2 / 11.4）。
-    safe_save_json(history_file, performance)
-    
-    # 量化指标（带缓存）
-    quant_key = "quant_metrics"
-    quant_data, quant_hit = _cache_get(quant_key)
-    if not quant_hit:
-        metrics_file = os.path.join(DATA_DIR, "quant_metrics.json")
-        if os.path.exists(metrics_file):
-            with open(metrics_file, "r", encoding="utf-8") as f:
-                quant_data = json.load(f)
-        else:
-            quant_data = {
-                "cumulative_nav": 2.6701,
-                "annual_return": 47.75,
-                "max_drawdown": -41.26,
-                "calmar_ratio": 1.1573,
-                "sharpe_ratio": 1.2882,
-                "ic": 0.0231,
-                "rank_ic": 0.0159,
-                "icir": 0.1420,
-                "updated_at": datetime.now().isoformat(),
-            }
-        _cache_set(quant_key, quant_data)
-
-    # 分析报告（长期缓存）
-    analysis_key = "analysis_report"
-    analysis_content, analysis_hit = _cache_get(analysis_key)
-    if not analysis_hit:
-        result_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "result_latest.md")
-        if os.path.exists(result_file):
-            with open(result_file, "r", encoding="utf-8") as f:
-                analysis_content = f.read()
-        else:
-            analysis_content = None
-        _cache_set(analysis_key, analysis_content)
-
-    # Agent 状态
+    quant_data = _load_quant_metrics()
+    analysis_content = _load_analysis_report()
     agent_status = _agent_store.get_agent_status()
 
     return jsonify({
@@ -226,6 +156,85 @@ def api_dashboard():
             "agent_status": agent_status,
         },
     })
+
+
+def _history_file():
+    """net_value_history.json 的绝对路径"""
+    return os.path.join(DATA_DIR, "net_value_history.json")
+
+
+def _load_net_value_history(portfolio):
+    """读取历史净值列表；文件不存在时用当前 portfolio 造一条当日记录。
+
+    返回的 list 会被调用方原地读-改-写，故必须是可变对象。
+    """
+    history_file = _history_file()
+    if os.path.exists(history_file):
+        with open(history_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return [{
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "value": portfolio.get("total_value", 100000),
+        "return_pct": portfolio.get("total_return_pct", 0),
+    }]
+
+
+def _append_today_record(performance, portfolio):
+    """把今日净值写进 performance（有则更新，无则追加）。
+
+    原地修改入参，与旧版内联逻辑一致；调用方负责随后持久化。
+    """
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    for record in performance:
+        if record.get("date") == today_str:
+            record["value"] = portfolio.get("total_value", 100000)
+            record["return_pct"] = portfolio.get("total_return_pct", 0)
+            return
+    performance.append({
+        "date": today_str,
+        "value": portfolio.get("total_value", 100000),
+        "return_pct": portfolio.get("total_return_pct", 0),
+    })
+
+
+def _load_quant_metrics():
+    """量化指标（带缓存）；文件缺失时回落到内置基准值。"""
+    data, hit = _cache_get("quant_metrics")
+    if hit:
+        return data
+    metrics_file = os.path.join(DATA_DIR, "quant_metrics.json")
+    if os.path.exists(metrics_file):
+        with open(metrics_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    else:
+        data = {
+            "cumulative_nav": 2.6701,
+            "annual_return": 47.75,
+            "max_drawdown": -41.26,
+            "calmar_ratio": 1.1573,
+            "sharpe_ratio": 1.2882,
+            "ic": 0.0231,
+            "rank_ic": 0.0159,
+            "icir": 0.1420,
+            "updated_at": datetime.now().isoformat(),
+        }
+    _cache_set("quant_metrics", data)
+    return data
+
+
+def _load_analysis_report():
+    """分析报告内容（长期缓存）；不存在时返回 None。"""
+    content, hit = _cache_get("analysis_report")
+    if hit:
+        return content
+    result_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "result_latest.md")
+    if os.path.exists(result_file):
+        with open(result_file, "r", encoding="utf-8") as f:
+            content = f.read()
+    else:
+        content = None
+    _cache_set("analysis_report", content)
+    return content
 
 
 @app.route("/api/portfolio")

@@ -2947,7 +2947,7 @@ error 早退、前 8 截断、缺 `代码` 跳过、`technical_analysis` 非 dic
 
 ## 49. performance_report.generate_report 拆分为五个打印段
 
-- 提交：`见本节 sync`（本文档追加后一并提交）
+- 提交：见 `git log`（本文档与 `performance_report.py` 同一提交）
 - 目标：`performance_report.py:13 generate_report()` 104 行 → 11 行，
   只保留「取 portfolio → 五段顺序调用」的编排职责。
 
@@ -3018,3 +3018,63 @@ error 早退、前 8 截断、缺 `代码` 跳过、`technical_analysis` 非 dic
 
 - 下一个候选：`web_dashboard.py:133 api_dashboard`，纯 HTTP 响应组装，
   可按「取数 / 算指标 / 组 JSON」拆三段；注意其带路由装饰器（教训见 43.5）。
+
+
+## 50. web_dashboard.api_dashboard 拆分为五个加载段
+
+- 提交：见 `git log`（本文档与 `web_dashboard.py` 同一提交）
+- 目标：`web_dashboard.py:133 api_dashboard()` 96 行 → 26 行，
+  只保留「取数 → 四段加载 → 组装 jsonify」的编排职责。
+
+### 50.1 拆分结果（AST 实测行数）
+
+| 函数 | 行数 |
+|---|---|
+| `api_dashboard`（含 docstring） | 26 |
+| `_history_file` | 3 |
+| `_load_net_value_history` | 14 |
+| `_append_today_record` | 16 |
+| `_load_quant_metrics` | 23 |
+| `_load_analysis_report` | 13 |
+
+### 50.2 拆分原则
+
+- `@app.route("/api/dashboard")` 装饰器**保留在 `api_dashboard` 上**，
+  五个 helper 全部无装饰器（教训见 43.5：拆带装饰器的函数后必须核对归属）。
+- `_load_net_value_history` 返回的 list 会被调用方原地读-改-写，
+  docstring 明确标注了该可变语义。
+- `_append_today_record(performance, portfolio)` 原地修改入参，
+  持久化（`safe_save_json`）仍由路由函数负责，写回时机与旧版完全一致。
+- 「读不改写」的 `_load_quant_metrics` / `_load_analysis_report` 保持旧版
+  「先查缓存 → 读文件 → 回落默认值 → 回写缓存」顺序，未做任何优化。
+- `_history_file()` 抽出仅为消除同一路径表达式重复出现，路径值逐字不变。
+- 返回文案、`datetime.now()` 调用点、`jsonify` 结构**逐字保留**。
+
+### 50.3 等价性实测（_twd.py，14/14 全一致）
+
+- 方法：`git show HEAD:web_dashboard.py` 导旧版到根目录 `_wd_old.py`，
+  `spec_from_file_location` 双加载；`DATA_DIR` 指向各自隔离的临时目录，
+  `load_portfolio` / `get_current_prices` / `_agent_store.get_agent_status` 打桩，
+  用 Flask `test_client` 打 `/api/dashboard`，对比**HTTP 状态码 + 完整 JSON**
+  与**写入磁盘的全部文件字节**。
+- 覆盖场景：无附属文件 / 已有今日记录 / 历史无今日记录（追加）/ 空 history list /
+  畸形 history json / history 为非 list / history 记录缺字段 / 带 quant 文件 /
+  畸形 quant json / 有分析报告 / 空 portfolio / portfolio 缺键 / 负收益 / 巨值。
+- 时间戳字段（顶层 `timestamp`、`quant_metrics.updated_at`）在对比前剔除，
+  其余字段全部参与逐字节比较。
+- 畸形 json 场景两版均抛 `json.decoder.JSONDecodeError`，异常类型一致。
+- 结果：`=== 14/14 一致 ===`。
+
+### 50.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `compileall web_dashboard.py` | CE=0 |
+| `pytest tests/ -q` | **125 passed** |
+| 等价性脚本 | 14/14 状态码 + JSON + 落盘字节全等 |
+
+### 50.5 说明
+
+- 「自动更新今日净值」与「写回文件」在旧版是一条注释隔开的连续步骤，
+  拆分后两步骤仍紧邻且顺序不变，只是中间隔了一次函数调用返回。
+- 与 49 节同理：本次只做函数拆分，未夹带缓存 key、TTL、回落默认值的任何改动。
