@@ -41,13 +41,8 @@ class ResearcherAgent(AgentBase):
         logger.info(f"[Researcher] starting research... (feedback: {feedback or 'none'})")
 
         try:
-            # 1. 获取板块信息（辅助筛选）
-            sector_result = self.call_tool("sector_rotation", top_n=5)
-            sector_data = json.loads(sector_result) if isinstance(sector_result, str) else sector_result
-
-            # 2. 搜索候选股票
-            search_result = self.call_tool("stock_search", n_stocks=15, min_change=0, max_change=6)
-            search_data = json.loads(search_result) if isinstance(search_result, str) else search_result
+            # 1-2. 获取板块信息并搜索候选股票
+            search_data = self._gather_candidates()
 
             if isinstance(search_data, dict) and "error" in search_data:
                 logger.error(f"[Researcher] stock_search failed: {search_data['error']}")
@@ -55,29 +50,8 @@ class ResearcherAgent(AgentBase):
 
             candidates = search_data if isinstance(search_data, list) else []
 
-            # 3. 对前几只候选股做技术分析
-            detailed_picks = []
-            for stock in candidates[:8]:
-                code = stock.get("代码", stock.get("code", ""))
-                if not code:
-                    continue
-
-                ta_result = self.call_tool("technical_analysis", code=code)
-                ta_data = json.loads(ta_result) if isinstance(ta_result, str) else ta_result
-
-                if isinstance(ta_data, dict) and "error" not in ta_data:
-                    # 综合评分
-                    score = self._calculate_score(stock, ta_data, market_state)
-                    detailed_picks.append({
-                        "code": code,
-                        "name": stock.get("名称", stock.get("name", code)),
-                        "sector": stock.get("行业", stock.get("sector", "")),
-                        "price": ta_data.get("current", ta_data.get("close", ta_data.get("收盘价", 0))),
-                        "change_pct": stock.get("5日涨跌", stock.get("5日涨跌", "0%")),
-                        "tech_indicators": ta_data,
-                        "score": score,
-                        "rationale": self._generate_rationale(stock, ta_data, market_state),
-                    })
+            # 3. 对前几只候选股做技术分析并综合评分
+            detailed_picks = self._analyze_candidates(candidates, market_state)
 
             # 4. 按评分排序，取前5
             detailed_picks.sort(key=lambda x: x["score"], reverse=True)
@@ -95,10 +69,7 @@ class ResearcherAgent(AgentBase):
                 )
 
             # 6. 对 top picks 做回测
-            for pick in top_picks:
-                bt_result = self.call_tool("backtest", code=pick["code"])
-                bt_data = json.loads(bt_result) if isinstance(bt_result, str) else bt_result
-                pick["backtest"] = bt_data
+            self._attach_backtests(top_picks)
 
             # 写入共享状态
             state.set_stock_picks(top_picks)
@@ -123,6 +94,49 @@ class ResearcherAgent(AgentBase):
         except Exception as e:
             logger.error(f"[Researcher] error: {e}")
             return AgentOutput(success=False, error=str(e))
+
+    def _gather_candidates(self):
+        """取板块信息（辅助筛选）并搜索候选股票，返回 stock_search 的解析结果。"""
+        sector_result = self.call_tool("sector_rotation", top_n=5)
+        sector_data = json.loads(sector_result) if isinstance(sector_result, str) else sector_result
+
+        search_result = self.call_tool("stock_search", n_stocks=15, min_change=0, max_change=6)
+        return json.loads(search_result) if isinstance(search_result, str) else search_result
+
+    def _analyze_candidates(self, candidates: List[Dict], market_state: Dict) -> List[Dict]:
+        """对前 8 只候选股做技术分析并综合评分，返回带评分与入选理由的明细列表。"""
+        detailed_picks = []
+        for stock in candidates[:8]:
+            code = stock.get("代码", stock.get("code", ""))
+            if not code:
+                continue
+
+            ta_result = self.call_tool("technical_analysis", code=code)
+            ta_data = json.loads(ta_result) if isinstance(ta_result, str) else ta_result
+
+            if isinstance(ta_data, dict) and "error" not in ta_data:
+                # 综合评分
+                score = self._calculate_score(stock, ta_data, market_state)
+                detailed_picks.append({
+                    "code": code,
+                    "name": stock.get("名称", stock.get("name", code)),
+                    "sector": stock.get("行业", stock.get("sector", "")),
+                    "price": ta_data.get("current", ta_data.get("close", ta_data.get("收盘价", 0))),
+                    "change_pct": stock.get("5日涨跌", stock.get("5日涨跌", "0%")),
+                    "tech_indicators": ta_data,
+                    "score": score,
+                    "rationale": self._generate_rationale(stock, ta_data, market_state),
+                })
+
+        return detailed_picks
+
+    def _attach_backtests(self, top_picks: List[Dict]) -> None:
+        """对入选股票逐个跑回测，把结果写回 pick['backtest']。"""
+        for pick in top_picks:
+            bt_result = self.call_tool("backtest", code=pick["code"])
+            bt_data = json.loads(bt_result) if isinstance(bt_result, str) else bt_result
+            pick["backtest"] = bt_data
+
 
     def _calculate_score(self, stock: Dict, ta: Dict, market: Dict) -> float:
         """综合评分（0-100）"""

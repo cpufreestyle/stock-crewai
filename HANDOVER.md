@@ -2702,3 +2702,88 @@ stub `_save_backtest_result` 为返回固定路径的桩（避免写 `history/` 
 - `backtest_strategy` 仍 61 行，其中 25 行是参数 docstring；有效逻辑已压到 36 行，
   继续拆分的收益低于维护成本，暂到此为止。
 
+
+
+## 46. 拆分 agents/researcher.py run() 为取数/分析/回测三段
+
+### 46.1 变更 lineage
+
+- `agents/researcher.py`：222 → 225 行（+3，为 docstring 与空行）
+- `ResearcherAgent.run()`：91 行 → 62 行（只保留编排骨架）
+- 新增 3 个方法级 helper（紧跟 `run()` 之后）：
+  `_gather_candidates` / `_analyze_candidates` / `_attach_backtests`
+
+### 46.2 拆分原则
+
+- `run()` 只保留「读市场状态 → 取候选 → 逐只分析 → 排序取前5 → 风控反馈调整 →
+  空结果早退 → 附回测 → 写状态 → 组装输出」九步编排，`try/except` 边界保持在 `run()`。
+- helper 单一职责：
+  - `_gather_candidates()`：调 `sector_rotation` + `stock_search`，返回 `stock_search` 的解析结果
+  - `_analyze_candidates(candidates, market_state)`：前 8 只做技术分析并评分，返回 `detailed_picks`
+  - `_attach_backtests(top_picks)`：对入选股逐个跑 `backtest`，原地写回 `pick["backtest"]`
+- `sector_rotation` 的调用留在 `_gather_candidates` 里而非丢掉：其返回值
+  （`sector_data`）虽未被后续使用，但调用本身有副作用价值（板块数据可能被工具侧
+  缓存），删除会改变行为，故原样保留。
+- `_analyze_candidates` 入参带 `market_state`（旧版闭包捕获），显式传参以保持可测性。
+
+### 46.3 等价性验证（25 场景）
+
+方法：`git show HEAD:agents/researcher.py` 导出版本 A，当前工作区为版本 B，
+`spec_from_file_location` 双加载，桩 `call_tool` 按脚本表返回预置 JSON / dict /
+抛异常，桩 `state` 提供 `get_market_state` / `set_stock_picks`，
+对比四项全等：`dataclasses.asdict(AgentOutput)` 全字段 JSON、`call_tool` 调用序列
+（工具名 + kwargs）、`set_stock_picks` 入参、异常路径的 `(类型, 消息)`。
+
+| 场景 | 结果 |
+|---|---|
+| 10 只候选全流程 | PASS |
+| `sector_rotation` 返回 dict（非字符串） | PASS |
+| `sector_rotation` 抛异常 | PASS |
+| `stock_search` 返回 `{"error": ...}`（早退） | PASS |
+| `stock_search` 返回空列表 | PASS |
+| `stock_search` 返回 JSON 字符串列表 | PASS |
+| `stock_search` 返回 plain dict | PASS |
+| `stock_search` 抛异常 | PASS |
+| `technical_analysis` 返回 `{"error": ...}`（跳过该股） | PASS |
+| `technical_analysis` 返回 list（非 dict，跳过） | PASS |
+| `technical_analysis` 抛异常 | PASS |
+| `technical_analysis` 返回 JSON 字符串 | PASS |
+| `backtest` 抛异常 | PASS |
+| `backtest` 返回 `{"error": ...}` | PASS |
+| 候选缺 `代码` / `代码` 为空（跳过） | PASS |
+| 英文字段名（`code`/`name`/`sector`） | PASS |
+| 20 只候选（超出前 8 截断） | PASS |
+| feedback 含「风险收益」 | PASS |
+| feedback 含「仓位」 | PASS |
+| feedback 同时含「风险」与「仓位」 | PASS |
+| 牛市 + `top_sectors` 命中 | PASS |
+| 熊市 | PASS |
+| `market_state` 为空 dict | PASS |
+| `regime` 为空字符串 | PASS |
+| 全部候选分析后 `top_picks` 为空（早退分支） | PASS |
+| 合计 25/25 四项全等 | PASS |
+
+覆盖到的分支：三个工具各自的「字符串 / dict / 抛错」三种返回形态、`stock_search` 的
+error 早退、前 8 截断、缺 `代码` 跳过、`technical_analysis` 非 dict 跳过、
+空 `top_picks` 早退、feedback 的三个关键词分支、`market_state` 的空 / 牛市 / 熊市。
+
+### 46.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `python -m compileall -q agents/researcher.py` | CE=0 |
+| `pytest tests/ -q` | 125 passed |
+
+### 46.5 说明
+
+- 语义零变化：`stock_search` 的 `n_stocks=15, min_change=0, max_change=6`、
+  `sector_rotation` 的 `top_n=5`、前 8 截断、`detailed_picks[:5]` 的取前 5、
+  `_adjust_for_feedback` 的「风险收益/风险」与「仓位」两个关键词分支、
+  `AgentOutput` 的全部字段（`data` 三项、`events` 结构）与错误早退的三个返回
+  全部逐字保留。
+- `_attach_backtests` 原地修改 `top_picks`（不返回值），与旧版 `for pick in top_picks:
+  pick["backtest"] = ...` 行为完全一致；这里刻意不改成「返回新列表」，因为旧版语义
+  就是原地写回，改成返回值反而多一次语义漂移。
+- 这是 `agents/` 目录下第 4 个被拆分的 `run()`；至此 `researcher` / `trader` /
+  `rebalancer` / `backtest_agent` 四个编排入口中已有三个完成同构拆分。
+
