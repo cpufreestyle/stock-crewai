@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from portfolio_tracker import load_portfolio, get_trade_history
 from data_fetcher import get_realtime_quotes
 from api_cache import TTLCache
+from safe_io import safe_save_json
 
 # Agent 系统集成
 from core.state_store import StateStore
@@ -172,8 +173,10 @@ def api_dashboard():
         })
     
     # 写回文件
-    with open(history_file, "w", encoding="utf-8") as f:
-        json.dump(performance, f, ensure_ascii=False, indent=2)
+    # 走 safe_io 的持锁原子写：这里是 GET 路径上的读-改-写，
+    # 裸 open("w") 会在并发请求/auditor 同时写时把文件撕裂
+    # （portfolio.json 与 trades_*.json 都踩过，见 HANDOVER 9.2 / 11.4）。
+    safe_save_json(history_file, performance)
     
     # 量化指标（带缓存）
     quant_key = "quant_metrics"
