@@ -46,6 +46,110 @@ def get_market_heat() -> Dict:
         }
 
 
+def _market_regime_insufficient() -> Dict:
+    """数据不足时的统一返回"""
+    return {"regime": "未知", "confidence": 0, "signals": ["数据不足"]}
+
+
+def _load_index_closes(index_code: str, days: int):
+    """拉取指数日线并返回有效收盘价序列；不足 60 根返回 None"""
+    idx_df = _sina_kline_direct(f"sh{index_code}", "daily",
+                                  (datetime.now() - timedelta(days=days+30)).strftime("%Y-%m-%d"),
+                                  datetime.now().strftime("%Y-%m-%d"))
+    if idx_df is None or idx_df.empty:
+        idx_df = ak.stock_zh_index_daily(symbol=f"sh{index_code}")
+
+    # 取最近的数据
+    idx_df = idx_df.tail(days)
+    if idx_df.empty or len(idx_df) < 60:
+        return None
+
+    # 主路径 _sina_kline_direct 返回中文列名（收盘），回退路径 ak.stock_zh_index_daily 返回英文 close
+    close_col = "收盘" if "收盘" in idx_df.columns else "close"
+    closes = pd.to_numeric(idx_df[close_col], errors="coerce").dropna()
+    if len(closes) < 60:
+        return None
+
+    return closes
+
+
+def _regime_momentum(closes, days: int) -> Dict:
+    """计算均线、动量与波动率指标"""
+    # 计算均线
+    ma20 = closes.rolling(20).mean()
+    ma60 = closes.rolling(60).mean()
+    ma120 = closes.rolling(120).mean() if len(closes) >= 120 else None
+
+    # 计算动量
+    ret_5d = (closes.iloc[-1] / closes.iloc[-6] - 1) * 100 if len(closes) >= 6 else 0
+    ret_20d = (closes.iloc[-1] / closes.iloc[-21] - 1) * 100 if len(closes) >= 21 else 0
+    ret_60d = (closes.iloc[-1] / closes.iloc[-61] - 1) * 100 if len(closes) >= 61 else 0
+
+    # 计算波动率
+    volatility = closes.pct_change().rolling(20).std().iloc[-1] * 100 if len(closes) >= 20 else 0
+
+    return {
+        "ma20": ma20, "ma60": ma60, "ma120": ma120,
+        "ret_5d": ret_5d, "ret_20d": ret_20d, "ret_60d": ret_60d,
+        "volatility": volatility,
+    }
+
+
+def _regime_signals(m: Dict) -> tuple:
+    """按 MA、动量逐项打分，返回 (signals, score)"""
+    signals = []
+    score = 0
+
+    # MA 趋势信号
+    if m["closes"].iloc[-1] > m["ma20"].iloc[-1]:
+        signals.append("价格>MA20 ✓")
+        score += 1
+    else:
+        signals.append("价格<MA20 ✗")
+        score -= 1
+
+    if m["ma20"].iloc[-1] > m["ma60"].iloc[-1]:
+        signals.append("MA20>MA60(多头) ✓")
+        score += 1
+    else:
+        signals.append("MA20<MA60(空头) ✗")
+        score -= 1
+
+    if m["ma120"] is not None:
+        if m["ma60"].iloc[-1] > m["ma120"].iloc[-1]:
+            signals.append("MA60>MA120(长期多头) ✓")
+            score += 1
+        else:
+            signals.append("MA60<MA120(长期空头) ✗")
+            score -= 1
+
+    # 动量信号
+    if m["ret_20d"] > 0:
+        signals.append(f"20日收益+{m['ret_20d']:.1f}% ✓")
+        score += 1
+    else:
+        signals.append(f"20日收益{m['ret_20d']:.1f}% ✗")
+        score -= 1
+
+    if m["ret_60d"] > 0:
+        signals.append(f"60日收益+{m['ret_60d']:.1f}% ✓")
+        score += 1
+    else:
+        signals.append(f"60日收益{m['ret_60d']:.1f}% ✗")
+        score -= 1
+
+    return signals, score
+
+
+def _regime_verdict(score: int) -> tuple:
+    """按总分映射市场状态与置信度"""
+    if score >= 3:
+        return "牛市", min(100, 50 + score * 10)
+    if score <= -3:
+        return "熊市", min(100, 50 + abs(score) * 10)
+    return "震荡市", 50 - abs(score) * 5
+
+
 @cached(ttl=300, cache_instance=market_cache)
 def get_market_regime(index_code: str = "000001", days: int = 120) -> Dict:
     """
@@ -58,89 +162,17 @@ def get_market_regime(index_code: str = "000001", days: int = 120) -> Dict:
     - signals: 各指标信号列表
     """
     try:
-        end_date = datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
-        
-        idx_df = _sina_kline_direct(f"sh{index_code}", "daily",
-                                      (datetime.now() - timedelta(days=days+30)).strftime("%Y-%m-%d"),
-                                      datetime.now().strftime("%Y-%m-%d"))
-        if idx_df is None or idx_df.empty:
-            idx_df = ak.stock_zh_index_daily(symbol=f"sh{index_code}")
-        
-        # 取最近的数据
-        idx_df = idx_df.tail(days)
-        if idx_df.empty or len(idx_df) < 60:
-            return {"regime": "未知", "confidence": 0, "signals": ["数据不足"]}
-        
-        # 主路径 _sina_kline_direct 返回中文列名（收盘），回退路径 ak.stock_zh_index_daily 返回英文 close
-        close_col = "收盘" if "收盘" in idx_df.columns else "close"
-        closes = pd.to_numeric(idx_df[close_col], errors="coerce").dropna()
-        # 计算均线
-        ma20 = closes.rolling(20).mean()
-        ma60 = closes.rolling(60).mean()
-        ma120 = closes.rolling(120).mean() if len(closes) >= 120 else None
-        
-        # 计算动量
-        ret_5d = (closes.iloc[-1] / closes.iloc[-6] - 1) * 100 if len(closes) >= 6 else 0
-        ret_20d = (closes.iloc[-1] / closes.iloc[-21] - 1) * 100 if len(closes) >= 21 else 0
-        ret_60d = (closes.iloc[-1] / closes.iloc[-61] - 1) * 100 if len(closes) >= 61 else 0
-        
-        # 计算波动率
-        volatility = closes.pct_change().rolling(20).std().iloc[-1] * 100 if len(closes) >= 20 else 0
-        
-        # 信号打分
-        signals = []
-        score = 0
-        
-        # MA 趋势信号
-        if closes.iloc[-1] > ma20.iloc[-1]:
-            signals.append("价格>MA20 ✓")
-            score += 1
-        else:
-            signals.append("价格<MA20 ✗")
-            score -= 1
-        
-        if ma20.iloc[-1] > ma60.iloc[-1]:
-            signals.append("MA20>MA60(多头) ✓")
-            score += 1
-        else:
-            signals.append("MA20<MA60(空头) ✗")
-            score -= 1
-        
-        if ma120 is not None:
-            if ma60.iloc[-1] > ma120.iloc[-1]:
-                signals.append("MA60>MA120(长期多头) ✓")
-                score += 1
-            else:
-                signals.append("MA60<MA120(长期空头) ✗")
-                score -= 1
-        
-        # 动量信号
-        if ret_20d > 0:
-            signals.append(f"20日收益+{ret_20d:.1f}% ✓")
-            score += 1
-        else:
-            signals.append(f"20日收益{ret_20d:.1f}% ✗")
-            score -= 1
-        
-        if ret_60d > 0:
-            signals.append(f"60日收益+{ret_60d:.1f}% ✓")
-            score += 1
-        else:
-            signals.append(f"60日收益{ret_60d:.1f}% ✗")
-            score -= 1
-        
+        closes = _load_index_closes(index_code, days)
+        if closes is None:
+            return _market_regime_insufficient()
+
+        m = _regime_momentum(closes, days)
+        m["closes"] = closes
+        signals, score = _regime_signals(m)
+
         # 判断市场状态
-        if score >= 3:
-            regime = "牛市"
-            confidence = min(100, 50 + score * 10)
-        elif score <= -3:
-            regime = "熊市"
-            confidence = min(100, 50 + abs(score) * 10)
-        else:
-            regime = "震荡市"
-            confidence = 50 - abs(score) * 5
-        
+        regime, confidence = _regime_verdict(score)
+
         return {
             "regime": regime,
             "confidence": round(confidence, 1),
@@ -148,12 +180,12 @@ def get_market_regime(index_code: str = "000001", days: int = 120) -> Dict:
             "score": score,
             "index_code": index_code,
             "current_price": round(closes.iloc[-1], 2),
-            "ma20": round(ma20.iloc[-1], 2),
-            "ma60": round(ma60.iloc[-1], 2),
-            "ret_5d": round(ret_5d, 2),
-            "ret_20d": round(ret_20d, 2),
-            "ret_60d": round(ret_60d, 2),
-            "volatility_20d": round(volatility, 2),
+            "ma20": round(m["ma20"].iloc[-1], 2),
+            "ma60": round(m["ma60"].iloc[-1], 2),
+            "ret_5d": round(m["ret_5d"], 2),
+            "ret_20d": round(m["ret_20d"], 2),
+            "ret_60d": round(m["ret_60d"], 2),
+            "volatility_20d": round(m["volatility"], 2),
             "日期": datetime.now().strftime("%Y-%m-%d")
         }
     except Exception as e:

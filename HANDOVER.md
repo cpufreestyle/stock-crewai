@@ -2457,3 +2457,83 @@ RSI/MACD/BOLL 三项增强各自的真假值、熊市/牛市门槛、现金约�
 - 原 `elif market_regime == 牛市` 的 `pass` 不可观测，故 helper 只做熊市门槛判断。
 - `or True`（position_ratio 恒真）与 `test_holdings_without_live_quote_still_count` 钉住的
   行为未触碰。
+
+## 43. 拆分 data_sources/market.get_market_regime 为加载/指标/打分/结论四层
+
+### 43.1 变更 lineage
+
+- `data_sources/market.py`：387 → 442 行（+55，全部为 docstring、空行与注释）
+- `get_market_regime()`：111 行 → 43 行（只保留编排骨架）
+- 新增 4 个模块级 helper：`_market_regime_insufficient` / `_load_index_closes` / `_regime_momentum` / `_regime_signals` / `_regime_verdict`
+
+### 43.2 拆分原则
+
+- `get_market_regime()` 只保留「拉数据 → 算指标 → 打分 → 映射结论 → 组装返回」五步。
+- helper 职责：
+  - `_market_regime_insufficient()`：数据不足的统一返回，消除两处重复字面量
+  - `_load_index_closes(index_code, days)`：sina 主路径 + ak 回退、`tail(days)`、
+    `< 60` 早退、中英列名适配、`to_numeric().dropna()`，返回 `None` 表示数据不够
+  - `_regime_momentum(closes, days)`：MA20/MA60/MA120、ret_5d/20d/60d、波动率
+  - `_regime_signals(m)`：MA 与动量逐项打分，回 `(signals, score)`；
+    额外把 `closes` 放进入参 dict，因为 MA 比较需要最后收盘价
+  - `_regime_verdict(score)`：总分 → `(regime, confidence)`
+- `try/except` 边界保持在 `get_market_regime`，helper 不捕获，异常文案与旧版一致。
+- `@cached(ttl=300, cache_instance=market_cache)` 装饰器仍挂在 `get_market_regime` 上，
+  缓存键语义不变（helper 不参与缓存）。
+
+### 43.3 等价性验证（25 场景）
+
+方法：`git show HEAD:data_sources/market.py` 导出版本 A，当前工作区为版本 B，
+以 `data_sources.<name>` 包路径双加载，替换 `ak`、`_sina_kline_direct` 为可控假件，
+对比 `get_market_regime()` 返回 dict 的 JSON 全等（键序无关化）。
+
+| 场景 | 结果 |
+|---|---|
+| sina 与 ak 均返回 None | PASS |
+| 空 DataFrame | PASS |
+| 仅 59 行（`< 60` 早退） | PASS |
+| 恰好 60 行全平 | PASS |
+| 120 行强上涨（牛市区） | PASS |
+| 120 行强下跌（熊市区） | PASS |
+| 中文列名 `收盘` 路径 | PASS |
+| 横盘震荡 | PASS |
+| V 形反转 | PASS |
+| 含 NaN 值 | PASS |
+| 正负交替序列 | PASS |
+| 极小价格（0.01 起） | PASS |
+| 极大价格（100000 起） | PASS |
+| 恰好 61 行（ret_60d 边界） | PASS |
+| 恰好 5 行 | PASS |
+| 恰好 20 行（波动率边界） | PASS |
+| 恰好 21 行（ret_20d 边界） | PASS |
+| 单行 | PASS |
+| 全零价格（除零 NaN 路径） | PASS |
+| 全负价格 | PASS |
+| `close` 与 `收盘` 同时存在 | PASS |
+| 列名不含 close/收盘（`KeyError` 路径） | PASS |
+| ak 回退路径：120 行上涨 | PASS |
+| ak 回退路径：均 None | PASS |
+| ak 回退路径：60 行全平 | PASS |
+| 合计 25/25 一致 | PASS |
+
+覆盖到的分支：主路径与 ak 回退两套数据源、`<60` 与 `<20` 与 `<21` 与 `<61` 与 `<6` 五处
+长度边界、MA120 的有无、中英列名、`to_numeric().dropna()` 后的 NaN 传播、牛市/熊市/震荡
+三种 verdict、置信度 100 封顶。
+
+### 43.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `python -m compileall -q data_sources/market.py` | CE=0 |
+| `pytest tests/ -q` | 125 passed |
+
+### 43.5 说明
+
+- 语义零变化：所有阈值（`< 60`、`>= 120`、`>= 20`、`score >= 3`、`score <= -3`）、
+  置信度公式（`50 + score*10` / `50 + abs*10` / `50 - abs*5`，100 封顶）、
+  `signals` 文案（含 ✓ / ✗）与返回字段的 `round(..., 2)` 精度全部逐字保留。
+- 拆分过程中曾把 `@cached` 装饰器误留在第一个 helper 上，等价性实测立即暴露（A 版因
+  缓存返回上一次结果全部 FAIL），移回 `get_market_regime` 后 25/25 通过。这再次说明
+  等价性驱动是不可省略的一步。
+- `_regime_signals` 入参带 `closes` 而非四个 Series，因为 MA 比较读的是同一批 Series；
+  用 dict 承载可避免 7 个位置参数。
