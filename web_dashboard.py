@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from portfolio_tracker import load_portfolio, get_trade_history
 from data_fetcher import get_realtime_quotes
+from api_cache import TTLCache
 
 # Agent 系统集成
 from core.state_store import StateStore
@@ -32,23 +33,21 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "history")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 # ─── 内存缓存 (LRU, 30s TTL) ───────────────────────────────────────
-_cache = {}
-_CACHE_TTL = 30
+# 复用 api_cache.TTLCache，不再另写一份 TTL dict（这是仓库里第三套缓存实现）。
+# 调用方要区分“命中但值为 None”与“未命中”，未命中统一 hit=False。
+_cache = TTLCache(default_ttl=30)
 
 
 def _cache_get(key):
-    """返回 (value, hit)"""
-    entry = _cache.get(key)
-    if entry is None:
+    """返回 (value, hit)，与改造前签名一致"""
+    val = _cache.get(key)
+    if val is None:
         return None, False
-    if time.time() - entry["t"] > _CACHE_TTL:
-        del _cache[key]
-        return None, False
-    return entry["v"], True
+    return val, True
 
 
 def _cache_set(key, value):
-    _cache[key] = {"v": value, "t": time.time()}
+    _cache.set(key, value)
 
 
 # ─── 后台子进程管理（避免僵尸进程堆积） ───────────────────────────
