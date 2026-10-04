@@ -2862,3 +2862,86 @@ error 早退、前 8 截断、缺 `代码` 跳过、`technical_analysis` 非 dic
 - 这是 `agents/` 目录下第 4 个被拆分的 `run()`；至此 `researcher` / `trader` /
   `rebalancer` / `backtest_agent` 四个编排入口全部完成同构拆分。
 
+
+
+## 48. 拆分 agents/sentiment_agent.py run() 的情绪分数解析段
+
+### 48.1 变更 lineage
+
+- `agents/sentiment_agent.py`：147 → 150 行（+3，为 docstring 与空行）
+- `SentimentAgent.run()`：75 行 → 69 行
+- 新增 1 个方法级 helper（紧跟 `run()` 之后）：`_attach_sentiment_score`
+
+### 48.2 拆分原则
+
+- 本轮只拆「解析 x/100 分数写回 pick」这一段内联逻辑，未动 `run()` 的整体编排：
+  三段式（市场情绪 → 逐只个股情绪 → 报告 + 写状态）与 `try/except` 边界全部保持原样。
+- helper 单一职责：
+  - `_attach_sentiment_score(pick, score_result)`：`re.search(r"(\\d+)/100", ...)` 匹配
+    则写 `pick["sentiment_score"] = int(...)`，不匹配则保持原状（旧版语义：
+    无 match 时什么都不写），异常路径才写中性分 50
+- `import re` 随 helper 下沉：旧版在循环体内 `import re`（每轮重复执行一次 import 查找），
+  下沉后每轮少一次 `sys.modules` 查找；`re` 是标准库，无第三方依赖副作用。
+- 之所以不再进一步拆「市场情绪段」与「逐只段」：两段合计只有 30 余行且各自只含一次
+  `call_tool` 与一次 `append`，继续拆只会增加跳转成本，不降低理解负担。
+
+### 48.3 等价性验证（23 场景）
+
+方法：`git show HEAD:agents/sentiment_agent.py` 导出版本 A，当前工作区为版本 B，
+`spec_from_file_location` 双加载，脚本化 `call_tool`（按工具名返回预置值或抛异常），
+假 `state` 提供 `get_stock_picks` / `get_market_state` / `set_sentiment_analysis`，
+对比五项全等：`dataclasses.asdict(AgentOutput)` 全字段 JSON、`call_tool` 调用序列、
+`set_sentiment_analysis` 入参、被原地修改的 `pick` 列表、异常路径的 `(类型, 消息)`。
+
+| 场景 | 结果 |
+|---|---|
+| `stock_picks` 为空列表 | PASS |
+| `stock_picks` 为 None | PASS |
+| 单只候选 | PASS |
+| 恰好 5 只候选 | PASS |
+| 8 只候选（超出前 5 截断） | PASS |
+| 候选缺 `code` 键（跳过） | PASS |
+| 候选 `code` 为空字符串（跳过） | PASS |
+| 分数文本 `100/100` | PASS |
+| 分数文本 `0/100` | PASS |
+| 分数文本不含 `/100`（无 match，不写字段） | PASS |
+| `score_result` 为 int（passthrough） | PASS |
+| `score_result` 为 float | PASS |
+| `score_result` 为 None | PASS |
+| 文本含多个数字（`前 100/100 后 20/100`，取第一个） | PASS |
+| `999/100` 越界值原样写入 | PASS |
+| `news_sentiment` 抛异常 | PASS |
+| `sentiment_score` 抛异常 | PASS |
+| `news_sentiment` 返回 dict（非字符串） | PASS |
+| 牛市 `market_state`（影响报告文案） | PASS |
+| 熊市 `market_state` | PASS |
+| `market_state` 为空 dict | PASS |
+| 重复 `code` 两只 | PASS |
+| pick 携带额外字段被保留 | PASS |
+| 合计 23/23 五项全等 | PASS |
+
+覆盖到的分支：前三步早退与截断、`code` 缺失与空串跳过、`re.search` 命中 / 未命中、
+`score_result` 的字符串 / int / float / None 四种类型、多个匹配取第一个、越界值原样写入、
+两个工具的抛异常路径、`market_state` 对 `_generate_sentiment_report` 的 `regime` 分支。
+
+### 48.4 测试与编译
+
+| 检查 | 结果 |
+|---|---|
+| `python -m compileall -q agents/sentiment_agent.py` | CE=0 |
+| `pytest tests/ -q` | 125 passed |
+
+### 48.5 说明
+
+- 语义零变化：`news_sentiment(stock_code="", days=3)` 与
+  `sentiment_score(stock_code=code)` 的调用参数、`stock_picks[:5]` 截断、
+  `sentiment_results` 的三类元素结构、`set_sentiment_analysis` 的
+  `market_sentiment` / `stock_sentiment`（列表推导过滤 `type == "stock"`）/ `report`
+  三字段、`AgentOutput.data` 三项与 `events` 结构全部逐字保留。
+- `_attach_sentiment_score` 里的 `try/except` 包裹了「无 match」这一正常路径：
+  这是旧版代码的原样保留（`re.search` 对非字符串输入会抛 `TypeError`，旧版靠外层
+  except 兜住写 50）。等价性实测覆盖了 int / float / None 三种非字符串输入，确认
+  沉淀后的行为与旧版一致。
+- 至此 `agents/` 目录下 4 个 `run()`（`researcher` / `trader` / `rebalancer` /
+  `backtest_agent`）与 `sentiment_agent.run()` 全部完成精简；`agents/` 已无 ≥70 行函数。
+

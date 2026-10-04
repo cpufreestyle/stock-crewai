@@ -50,7 +50,7 @@ class SentimentAgent(AgentBase):
                 for pick in stock_picks[:5]:  # 只分析前5只
                     code = pick.get("code", "")
                     name = pick.get("name", "")
-                    
+
                     if not code:
                         continue
 
@@ -63,13 +63,7 @@ class SentimentAgent(AgentBase):
                     })
 
                     # 将情绪评分加入 pick
-                    try:
-                        import re
-                        match = re.search(r"(\d+)/100", score_result)
-                        if match:
-                            pick["sentiment_score"] = int(match.group(1))
-                    except Exception:
-                        pick["sentiment_score"] = 50  # 默认中性
+                    self._attach_sentiment_score(pick, score_result)
 
             # 3. 生成情绪报告
             report = self._generate_sentiment_report(sentiment_results, market_state)
@@ -103,6 +97,17 @@ class SentimentAgent(AgentBase):
         except Exception as e:
             logger.error(f"[Sentiment] error: {e}")
             return AgentOutput(success=False, error=str(e))
+
+    def _attach_sentiment_score(self, pick: Dict, score_result: str) -> None:
+        """从情绪工具输出中解析 x/100 分数写入 pick；解析失败时记中性分 50。"""
+        try:
+            import re
+            match = re.search(r"(\d+)/100", score_result)
+            if match:
+                pick["sentiment_score"] = int(match.group(1))
+        except Exception:
+            pick["sentiment_score"] = 50  # 默认中性
+
 
     def _generate_sentiment_report(self, results: List[Dict], market: Dict) -> str:
         """生成情绪分析报告"""
