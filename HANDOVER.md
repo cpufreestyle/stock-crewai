@@ -1079,3 +1079,33 @@ Select-String -Path crew_run10.log -Pattern "Maximum iterations reached|absolute
 7. **终端回显中文会乱码**（cp936 / UTF-16LE 都救不回来）。要判断结果就让脚本只输出 ASCII，
    或写文件后用 Read 看。16.6 那两条被拒日志就是靠 ASCII 字段（`advice_only=true`）而非
    中文正文确认的。
+
+
+## 十八、精简代码（2026-10-04）
+
+目标：不改行为，删死代码、合重复实现、清无效导入。每步都跑 `pytest tests/ -q`（基线 56 passed）。
+
+### 18.1 删除内容
+
+- `ad976a3` — `strategy_momentum.py` 里 59 行重复的 `get_sina_realtime()`，与 `data_fetcher.py` 同名函数输出结构完全一致；改为 6 行 `_quote()` 委托，行情解析收敛到唯一实现。
+- `00729f2` — `data_fetcher.get_stock_info` / `get_financials`，全仓零调用点。
+- `bc17250` — 整模块归档 `db.py`（206 行 SQLite 层，无 import）与 `alert.py`（116 行，无 import）；另删 `technical_indicators.generate_signal`、`recommendation_tracker.track_performance`、`llm_analyst.market_overview_report`、`portfolio_tracker.auto_sell_triggered`。
+- `e430b46` — 5 个文件 12 处未使用导入（`numpy`、`asyncio`、`sys`、`time`、`Optional` 等）。
+
+归档而非删除：两个模块移到 `_quarantine/2026-10-04/unused-modules/`，git 历史可回溯。
+
+### 18.2 顺带修掉一个真 bug
+
+`config.py` 缺 4 个 `CIRCUIT_BREAKER_*` 常量，而 `circuit_breaker.py` 在 import 时就 `from config import (...)` 它们，因此该模块此前完全无法 import。`tools/risk_tools.py:181` 与 `crew.py:272` 都挂着 `CircuitBreakerCheckTool`，风控智能体的 `circuit_breaker_check` 工具一调就崩。已按现有风控口径补常量：单日亏损 8%、连续 3 次止损、冷却 60 分钟、状态文件 `circuit_breaker_state.json`。修复后 `crew → tools.risk_tools → agents.risk_manager_agent → circuit_breaker` 全链路 import 通过。
+
+### 18.3 刻意保留、没动的东西
+
+- `data_fetcher.get_fundamental_data`：看着像死代码，但它是包在活的 `get_fundamental_batch` 上的 2 行公开包装，docstring 声明了对外契约。
+- `web_dashboard.py` 全部 `api_*`：Flask `@app.route` 注册，没有文本调用点，静态扫会误判。整模块实测零死函数。
+- `run_virtual_v4.py`（718 行）：仍是 `docker-compose.yml:19` 的 CMD，是活的。合并它属于架构决策，不是机械删除。
+- `__init__.py` 的再导出（`agents/`、`core/`、`workflows/`）：公开 API，非死代码。
+
+### 18.4 审计方法（下次直接用）
+
+死代码扫描用 AST，别用正则。第一版正则漏掉多行 `from x import (a, b)`，报了 122 条假阳性；改成 `ast.walk` 收集 `ast.Name`，减去已用名后剩下的才是真死导入。删除前必须确认三件事：定义处是否为唯一引用、有无 `__main__` 调用、文档或装配是否提到。
+
