@@ -1499,3 +1499,50 @@ run_crew_scheduled.vbs -> run_crew_then_release.py。
 run_virtual_v4.py / DOCKER.md）。此前那一堆 LM Studio、harness、API 探测的
 残留清完了。
 
+
+
+## 二十七、清理过期文档，并修掉 CONTRIBUTING 里的坏示例（2026-10-05）
+
+### 27.1 归档 5 份过期文档（5e873e4）
+
+先查每份文档“除自身外还有谁引用”，零引用的有 6 份；
+再逐份核对内容是否描述已归档的东西：
+
+- DBHT-KNOWLEDGEBASE.md   Horse Farm 工具生成的项目清单，列的是一批
+  已不存在的文件（agents.py、fix_last_price.py、install_task.ps1、
+  launch_virtual.bat、run_virtual*.py、virtual_trader.py、test_all.py），
+  需求一栏还写着“优化”。
+- README_VIRTUAL.md       讲 run_virtual.py / launch_virtual.bat /
+  install_task.ps1 这三个都已归档的虚拟盘脚本；唯一引用它的就是上面那份清单。
+- LMSTUDIO_VS_OLLAMA.md   LM Studio 与 Ollama 的选型对比；结论（用 Ollama）
+  在 HANDOVER 第 11/13 节，这份对比本身已无引用。
+- harness/PROFILE.md       描述 Claude Harness 开发环境，与 harness-start.bat
+  一同退出（见 26.2）。
+- docs/docker-restore-record.md  旧 Docker 部署的恢复记录。
+  CI 只检查 docs/ 目录存在，删这个文件不影响流水线。
+
+归档到 _quarantine/2026-10-05/stale-docs/ 并附 README 说明各自由来。
+harness/ 目录因此变空，一并删除。
+
+归档后根目录只剩 5 份 md：README / CONTRIBUTING / DOCKER / HANDOVER /
+result_latest.md（实跑产物），docs/ 下留 multi-agent-architecture.md 与 openapi.yaml。
+
+### 27.2 修掉 CONTRIBUTING.md 的坏示例
+
+这份指南没归档，因为改改还有用。但它有三处会直接坑到新人：
+
+- 让人跑 pytest tests/test_indicators.py —— 该文件不存在（3 处引用）；
+- RSI 示例只给 7 个价格，而 calculate_rsi 默认 period=14，样本不足返回 None，
+  于是照着抄的 assert 立刻 TypeError 崩掉（实测 7 个 -> None，30 个 -> 60.0）；
+- 注释里的文件名也是那个不存在的文件。
+
+已改为指向真实测试文件，并把 RSI 示例换成 30 个样本、先断言 is not None 再查范围，
+实测该示例能跑通。MACD 示例（[100]*50）验证过可用，未动。
+
+### 27.3 验证
+
+CONTRIBUTING 的 RSI 与 MACD 示例都实际执行通过；
+docs/ 目录仍在（CI 的 test -d docs 不会失败）；
+README/CONTRIBUTING/DOCKER 三份文档里没有指向已归档文档的死链；
+compileall 干净、125 测试全过。
+
