@@ -1728,3 +1728,41 @@ git grep 验证引用点（正则 grep 会漏多行 import 与字符串形式的
 
 `quant_metrics.py` 被 backtest / performance_metrics / web_dashboard 引用。
 
+## 三十一、归档 harness_guard.py 孤儿模块（2026-10-05）
+
+### 31.1 全仓死代码扫描（口径修正）
+
+三十节用的 AST-import 口径有缺陷：`import agents.trader` 只记录了顶层名
+`agents`，导致 45 个模块被误报为「从未导入」。本改用「basename 全仓
+git grep + 排除文档/自引」口径重扫（脚本 `_deadscan.py`，跑完即删）：
+
+- 扫描范围：排除 `.git` / `.venv` / `_quarantine` / `__pycache__` /
+  `.pytest_cache` 后的 72 个 .py 文件。
+- 判定：某模块名在整个被 git 跟踪的文件里，除 HANDOVER.md / README.md /
+  requirements.txt / .gitignore 及自身外无任何命中，即零代码引用。
+
+结果只剩 7 条，其中 5 条是 tests/ 测试文件和扫描脚本自身（正常，测试由
+pytest 收集而非 import），真正孤儿只有 `harness_guard.py`。
+
+同时顺带确认这批候选**不是**死代码：
+
+- `tools/compat.py`：被 tools/market_tools、notify_tools、risk_tools、
+  stock_tools、trade_tools 五个模块 `from tools.compat import BaseTool`。
+- `dry_run_offline.py`：crew.py:254 有契约注释钉住「必须调用
+  crew.build_agents()」，HANDOVER.md 多处列为零 token 自检入口。
+- `performance_report.py`：其 calc 函数已在 20 节收敛进 quant_metrics.py，
+  但文件名仍被 HANDOVER.md 与 quant_metrics.py 的 docstring 引用。
+
+### 31.2 归档 harness_guard.py
+
+它监控的 `harness/` 目录与唯一启动器 `harness-start.bat` 已在 26.2 一起
+归档，它生成的健康快照已在 28.x 删除；`check_harness_running()` 靠 grep
+powershell 命令行里的 `codex` 判断进程，在本机已无意义。继续留着只会
+让人以为 harness 还活着（28.3 已批评过这种误导）。
+
+移入 `_quarantine/2026-10-05/dead-modules/`，README 已补第四条记录。
+
+### 31.3 验证证据
+
+- `compileall -q agents tests tools <根目录 .py>`：CE=0
+- `pytest tests/ -q`：125 passed, 22 warnings（与 29.4 基线一致，无回归）
