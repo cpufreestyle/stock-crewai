@@ -32,7 +32,6 @@ import trading_plan as tp_plan
 import risk_manager as rm
 from collections import Counter
 from datetime import datetime
-import os
 import sys
 
 # 任务描述里指代上游输出的固定措辞。

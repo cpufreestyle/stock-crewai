@@ -7,13 +7,9 @@
 import os
 
 from api_cache import (
-    TTLCache,
     cached,
     realtime_cache,
     market_cache,
-    kline_cache,
-    clear_all_caches,
-    get_all_cache_stats
 )
 
 # 清除代理设置，国内财经网站直连即可

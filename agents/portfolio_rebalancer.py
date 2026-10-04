@@ -9,7 +9,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import json
 import logging
 from typing import Any, Dict, List
-from datetime import datetime
 
 from core.agent_base import AgentBase, AgentOutput
 from tools.trade_tools import get_trade_tools

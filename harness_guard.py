@@ -7,8 +7,6 @@ Stock-CrewAI Claude Harness 健康监控
 """
 
 import sys
-import json
-import time
 import subprocess
 from pathlib import Path
 from datetime import datetime

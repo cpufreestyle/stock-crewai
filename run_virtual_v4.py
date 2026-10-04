@@ -19,7 +19,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import json
-import os
 import time
 import socket
 from datetime import datetime
