@@ -188,6 +188,64 @@ class Orchestrator:
 
     # ── 工作流执行 ────────────────────────────────────────────────
 
+    # ── 工作流执行 ────────────────────────────────────────────────
+
+    def _condition_met(self, step: WorkflowStep, context: Dict) -> bool:
+        """求值 step.condition；无条件视为通过，异常视为通过（不阻断流程）"""
+        if not step.condition:
+            return True
+        try:
+            if not eval(step.condition, {"context": context}):
+                logger.info(f"[Orchestrator] condition not met, skipping {step.agent}")
+                return False
+        except Exception as e:
+            logger.warning(f"[Orchestrator] condition eval error: {e}")
+        return True
+
+    def _run_step_with_retry(self, step: WorkflowStep, context: Dict, results: list,
+                             step_index: int, workflow_name: str) -> None:
+        """执行单个 step，按 on_reject 策略（retry/skip/abort）驱动重试循环。"""
+        retries = 0
+        while retries <= step.max_retries:
+            logger.info(f"[Orchestrator] step {step_index}/{len(self._workflows[workflow_name].steps)}: {step.agent} (attempt {retries + 1})")
+
+            task = {
+                "task_name": f"{workflow_name}_step{step_index}",
+                "step_index": step_index,
+                "workflow": workflow_name,
+                **context,
+            }
+
+            output = self.run_agent(step.agent, task)
+            results.append({
+                "step": step_index,
+                "agent": step.agent,
+                "success": output.success,
+                "attempt": retries + 1,
+                "data": output.data,
+            })
+
+            if output.success:
+                # 保存输出到上下文
+                context[f"output_{step.agent}"] = output.data
+                return
+
+            if output.rejection and step.on_reject == "retry":
+                retries += 1
+                if retries <= step.max_retries:
+                    logger.info(f"[Orchestrator] retrying {step.agent} (feedback: {output.rejection})")
+                    context["feedback"] = output.rejection
+                    continue
+                logger.error(f"[Orchestrator] {step.agent} max retries reached")
+                if step.on_reject == "abort":
+                    return
+
+            if step.on_reject == "skip":
+                logger.info(f"[Orchestrator] skipping {step.agent}")
+            elif step.on_reject == "abort":
+                logger.error(f"[Orchestrator] aborting workflow at step {step_index}")
+            return
+
     def execute_workflow(self, workflow_name: str, params: Dict = None) -> Dict:
         """同步执行工作流（逐步执行，支持 REJECT 反馈循环）"""
         workflow = self._workflows.get(workflow_name)
@@ -216,65 +274,16 @@ class Orchestrator:
                 continue
 
             # 检查条件
-            if step.condition:
-                try:
-                    if not eval(step.condition, {"context": context}):
-                        logger.info(f"[Orchestrator] step {i}: condition not met, skipping {step.agent}")
-                        results.append({"step": i, "skipped": True, "reason": "condition not met"})
-                        continue
-                except Exception as e:
-                    logger.warning(f"[Orchestrator] step {i}: condition eval error: {e}")
+            if not self._condition_met(step, context):
+                results.append({"step": i, "skipped": True, "reason": "condition not met"})
+                continue
 
             # 从上游输出获取输入
             if step.input_from:
                 upstream_data = context.get(f"output_{step.input_from}", {})
                 context["upstream_output"] = upstream_data
 
-            # 执行 Agent（带重试循环）
-            retries = 0
-            while retries <= step.max_retries:
-                logger.info(f"[Orchestrator] step {i}/{len(workflow.steps)}: {step.agent} (attempt {retries + 1})")
-
-                task = {
-                    "task_name": f"{workflow.name}_step{i}",
-                    "step_index": i,
-                    "workflow": workflow_name,
-                    **context,
-                }
-
-                output = self.run_agent(step.agent, task)
-                results.append({
-                    "step": i,
-                    "agent": step.agent,
-                    "success": output.success,
-                    "attempt": retries + 1,
-                    "data": output.data,
-                })
-
-                if output.success:
-                    # 保存输出到上下文
-                    context[f"output_{step.agent}"] = output.data
-                    break
-
-                if output.rejection and step.on_reject == "retry":
-                    retries += 1
-                    if retries <= step.max_retries:
-                        logger.info(f"[Orchestrator] retrying {step.agent} (feedback: {output.rejection})")
-                        context["feedback"] = output.rejection
-                        continue
-                    else:
-                        logger.error(f"[Orchestrator] {step.agent} max retries reached")
-                        if step.on_reject == "abort":
-                            break
-
-                if step.on_reject == "skip":
-                    logger.info(f"[Orchestrator] skipping {step.agent}")
-                    break
-                elif step.on_reject == "abort":
-                    logger.error(f"[Orchestrator] aborting workflow at step {i}")
-                    break
-                else:
-                    break
+            self._run_step_with_retry(step, context, results, i, workflow_name)
 
         # 发布工作流完成事件
         self.event_bus.publish_sync(Event(
@@ -289,6 +298,8 @@ class Orchestrator:
             "results": results,
             "context_keys": list(context.keys()),
         }
+
+
 
     # ── 查询接口 ──────────────────────────────────────────────────
 
@@ -377,3 +388,4 @@ if __name__ == "__main__":
     print(json.dumps(orch.get_status(), indent=2, default=str))
 
     print("\n✅ Orchestrator 测试通过")
+

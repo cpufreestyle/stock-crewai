@@ -1953,4 +1953,52 @@ values/trades/entry 六个变量 + 同一个循环骨架），复制粘贴痕迹
 - `core/orchestrator.py` 的 `Orchestrator` 类 285 行（下一目标）
 - `web_dashboard.py` 459 行（多为路由与内联 HTML，需先确认是否有单函数超标）
 
+## 三十六、拆分 core/orchestrator.py execute_workflow()（2026-10-05）
+
+### 36.1 背景
+
+`Orchestrator` 类 285 行，其中 `execute_workflow()` 一个方法就占 101 行，
+内部套了三层循环/分支：按 step 迭代 → 条件检查 → while 重试循环 →
+on_reject 的 retry/skip/abort 三分支。读一遍很难分清「哪层负责什么」。
+
+该方法被 `core/scheduler.py:35` 与 `web_dashboard.py:511/516` 调用，是日常工作流
+的实际入口；`tests/` 下无覆盖，但可用 `python -m core.orchestrator` 自带的
+`__main__` 冒烟（FakeResearcher/FakeRiskManager 两步工作流）验证。
+
+### 36.2 拆分方案
+
+`execute_workflow()`（101 → 52 行）抽出两个方法：
+
+- `_condition_met(step, context)` — 求值 step.condition；无条件/异常均视为通过
+- `_run_step_with_retry(step, context, results, step_index, workflow_name)` —
+  单个 step 的重试循环与 on_reject 策略
+
+行为等价处理：
+
+- 原重试循环里 `max retries reached` 之后先判 `if step.on_reject == "abort"`，
+  而此时 `on_reject` 必为 "retry"（外层 `if output.rejection and` 已限定），
+  该内层 abort 分支恒不执行，故合并为直接 break（现为 return）。
+- 原末尾 `if skip / elif abort / else: break` 三个分支等价于 skip 打日志、
+  abort 打日志、其他直接返回，合并为两条日志分支 + 统一 return。
+- 步骤序号改由参数 `step_index` 传入，总步数从 `self._workflows[workflow_name]`
+  取，与原 `len(workflow.steps)` 等价（workflow 已在注册表里）。
+
+### 36.3 验证证据
+
+- `py_compile core/orchestrator.py`：CE=0
+- `compileall -q agents tests tools core workflows <根目录 .py>`：CE=0
+- `python -m core.orchestrator` 冒烟：两步工作流均 `success=True`（脚本末尾
+  `json.dumps` 处 `NameError: json` 是拆分前就存在的旧 bug，未触碰）
+- `pytest tests/ -q`：125 passed, 22 warnings（无回归）
+- `execute_workflow` 101 → 52 行；`Orchestrator` 285 → 296 行；文件 379 → 391 行
+
+### 36.4 全仓库函数规模复查
+
+拆分本轮四个大函数后，`git ls-files '*.py'` 中最长函数已降到 100 行以下
+（`backtest.py` `backtest_strategy` 94 行为当前最长）。下一批候选：
+
+- `web_dashboard.py` 459 行（路由 + 内联 HTML，需查是否有单函数超标）
+- `core/agent_base.py` 216 行
+- `workflows/daily_analysis.py` 与 `crew.py` 的职责收敛（仍未拍板）
+
 
