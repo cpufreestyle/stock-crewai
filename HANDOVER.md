@@ -1859,3 +1859,43 @@ powershell 命令行里的 `codex` 判断进程，在本机已无意义。继续
 - `core/orchestrator.py` 285 行 Orchestrator 类
 - `workflows/daily_analysis.py` 与 `crew.py` 的职责重叠（32.4 已记录，仍未拍板）
 
+## 三十四、拆分 crew.py prepare_market_data()（2026-10-05）
+
+### 34.1 背景
+
+`crew.py` 的 `prepare_market_data()` 118 行，按数据源顺序堆了五段：市场情绪/趋势、
+强势板块、持仓刷新与摘要、候选股票池逐只行情+估值、财经要闻。每段都与上下文
+共享 `lines` 列表，中间还夹着一次 aux 网络刷新（`refresh_position_prices`）
+和一次批量取数。改动某一段时很难确认影响面。
+
+它是 `dry_run_offline.py`（零 token 自检入口，26 节有契约注释）的被调方，
+契约是「必须调用 crew.build_agents()」；本次只动函数体内部结构，签名与返回
+类型（`str`）不变，契约不受影响。
+
+### 34.2 拆分方案
+
+主函数缩到 34 行，只保留取数顺序与 `\n` 拼接，五个段落各自成函数：
+
+- `_heat_and_regime_lines(heat, regime)` — 情绪 + 趋势两段
+- `_sector_lines()` — 强势板块 TOP5
+- `_portfolio_lines()` — 刷新持仓现价 + 持仓状态段
+- `_candidate_lines(pool, prices_map, fund_map)` — 逐只候选行情（含估值内联）
+- `_news_lines()` — 近期要闻；缺失时留显式缺口说明
+
+原 `if price_data is not None and not price_data.empty: ... else: 数据获取失败`
+反转为 `if price_data is None or price_data.empty: continue`，少一层缩进；
+文本格式、阈值（MA5>MA20、RSI 70/30、5日 ±2%、截断长度）全部原样保留。
+
+### 34.3 验证证据
+
+- `py_compile crew.py`：CE=0
+- `python -c "import dry_run_offline"`：rc=0（零 token 契约未被破坏）
+- `pytest tests/ -q`：125 passed, 22 warnings（无回归）
+- `prepare_market_data` 118 行 → 34 行；`crew.py` 552 → 580 行
+
+### 34.4 后续候选
+
+- `crew.py` 已无 100 行以上函数；下一批目标是 `backtest.py`（218/161 行两函数）
+  与 `core/orchestrator.py`（285 行 Orchestrator 类）
+
+

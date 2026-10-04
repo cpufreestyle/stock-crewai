@@ -42,59 +42,47 @@ CTX_REF_RISK = "（见下方上下文中「风险评估」任务的输出）"
 CTX_REF_TRADING = "（见下方上下文中「交易计划」任务的输出）"
 
 
-def prepare_market_data(n_stocks: int = 10, heat: dict = None, regime: dict = None) -> str:
-    """准备市场数据给LLM分析（优化：并行获取 + 精简数量）
 
-    heat/regime 可由调用方预先获取后传入，避免 run_daily_analysis
-    在保存报告阶段重复请求（get_market_heat 走 akshare 无缓存，
-    重复调一次多等数秒且可能失败）。
-    """
-    lines = []
-    
-    # 市场情绪
-    if heat is None:
-        heat = df.get_market_heat()
-    lines.append(f"市场情绪数据: 涨停={heat.get('涨停家数', 'N/A')}家, "
-                 f"跌停={heat.get('跌停家数', 'N/A')}家, "
-                 f"市场状态={heat.get('市场状态', 'N/A')}")
-    
+def _heat_and_regime_lines(heat: dict, regime: dict) -> list:
+    """生成市场情绪 + 趋势判断两段文本行。"""
+    lines = [f"市场情绪数据: 涨停={heat.get('涨停家数', 'N/A')}家, "
+             f"跌停={heat.get('跌停家数', 'N/A')}家, "
+             f"市场状态={heat.get('市场状态', 'N/A')}"]
+
     # 市场状态判断（牛熊市）
-    if regime is None:
-        regime = df.get_market_regime()
     if regime.get("regime") != "未知":
         lines.append(f"\n市场趋势: 【{regime.get('regime', 'N/A')}】置信度{regime.get('confidence', 0)}%")
         for sig in regime.get("signals", [])[:4]:
             lines.append(f"  - {sig}")
-    
-    # 板块轮动
+    return lines
+
+
+def _sector_lines() -> list:
+    """生成强势板块 TOP5 段。"""
     sectors = df.get_sector_performance()
-    if sectors:
-        lines.append(f"\n强势板块 TOP5:")
-        for s in sectors[:5]:
-            lines.append(f"  {s['name']}: {s['change_pct']:+.2f}%")
-    
-    # 当前持仓（先批量刷新 last_price：get_portfolio_summary / check_stop_loss
+    if not sectors:
+        return []
+    lines = ["\n强势板块 TOP5:"]
+    lines += [f"  {s['name']}: {s['change_pct']:+.2f}%" for s in sectors[:5]]
+    return lines
+
+
+def _portfolio_lines() -> list:
+    """刷新持仓现价后生成持仓状态段（刷新失败只告警，不中断）。"""
+    # 先批量刷新 last_price：get_portfolio_summary / check_stop_loss
     # 拿不到外部报价时会退到成本价，报告里所有持仓就都显示
-    # “现价=成本”，风控/调仓会基于陈旧价格决策）
+    # “现价=成本”，风控/调仓会基于陈旧价格决策
     try:
         refreshed = pt.refresh_position_prices()
         print(f"[持仓现价] 已刷新 {len(refreshed)} 只")
     except Exception as e:
         print(f"[警告] 持仓现价刷新失败: {e}")
-    portfolio_summary = pt.get_portfolio_summary()
-    lines.append(f"\n当前持仓状态:\n{portfolio_summary}")
-    
-    # 从候选股票池中抽样（精简到 10 只）
-    pool = df.get_index_components()["code"].tolist()[:n_stocks]
-    
-    # 并行获取所有股票行情（优化点）
-    print(f"[并行] 正在获取 {len(pool)} 只股票行情...")
-    prices_map = df.get_batch_stock_prices(pool)
-    # 估值一次批量取回并内联：研究员据此判断，不必逐只调 fundamental_analysis
-    fund_map = df.get_fundamental_batch(pool)
+    return [f"\n当前持仓状态:\n{pt.get_portfolio_summary()}"]
 
-    lines.append(f"\n候选股票池行情（共{len(pool)}只，分析最近90天）:")
-    
+
+def _candidate_lines(pool: list, prices_map: dict, fund_map: dict) -> list:
+    """逐只生成候选股票行情行（含估值内联，取不到写显式缺口）。"""
+    lines = [f"\n候选股票池行情（共{len(pool)}只，分析最近90天）:"]
     for code in pool:
         try:
             price_data = prices_map.get(code)
@@ -105,61 +93,100 @@ def prepare_market_data(n_stocks: int = 10, heat: dict = None, regime: dict = No
                     name = s["name"]
                     sector = s["sector"]
                     break
-            
-            if price_data is not None and not price_data.empty:
-                tech = df.calculate_technical(price_data)
-                
-                ma_bull = ""
-                if tech.get("MA5") and tech.get("MA20"):
-                    if tech["MA5"] > tech["MA20"]:
-                        ma_bull = "✓"
-                
-                rsi = tech.get("RSI", 50)
-                rsi_status = "超买" if rsi > 70 else ("超卖" if rsi < 30 else "正常")
-                
-                ret = tech.get("5日涨跌%", 0)
-                trend = "↑" if ret > 2 else ("↓" if ret < -2 else "→")
 
-                fund = fund_map.get(code) or {}
-                if fund:
-                    valuation = (f"PE={fund.get('PE', 'N/A')} "
-                                 f"PB={fund.get('PB', 'N/A')} "
-                                 f"总市值={fund.get('总市值(亿)', 'N/A')}亿")
-                else:
-                    valuation = "估值=暂缺(勿凭印象编造)"
-
-                lines.append(
-                    f"  {code} {name}({sector}): "
-                    f"现价={tech.get('收盘价','N/A')}元 "
-                    f"MA5={tech.get('MA5','N/A')} "
-                    f"MA20={tech.get('MA20','N/A')} "
-                    f"RSI={rsi}({rsi_status}) "
-                    f"{trend}5日{ret:+.1f}%{ma_bull} "
-                    f"{valuation}"
-                )
-            else:
+            if price_data is None or price_data.empty:
                 lines.append(f"  {code} {name}: 数据获取失败")
+                continue
+
+            tech = df.calculate_technical(price_data)
+
+            ma_bull = ""
+            if tech.get("MA5") and tech.get("MA20"):
+                if tech["MA5"] > tech["MA20"]:
+                    ma_bull = "✓"
+
+            rsi = tech.get("RSI", 50)
+            rsi_status = "超买" if rsi > 70 else ("超卖" if rsi < 30 else "正常")
+
+            ret = tech.get("5日涨跌%", 0)
+            trend = "↑" if ret > 2 else ("↓" if ret < -2 else "→")
+
+            # 估值一次批量取回并内联：研究员据此判断，不必逐只调 fundamental_analysis
+            fund = fund_map.get(code) or {}
+            if fund:
+                valuation = (f"PE={fund.get('PE', 'N/A')} "
+                             f"PB={fund.get('PB', 'N/A')} "
+                             f"总市值={fund.get('总市值(亿)', 'N/A')}亿")
+            else:
+                valuation = "估值=暂缺(勿凭印象编造)"
+
+            lines.append(
+                f"  {code} {name}({sector}): "
+                f"现价={tech.get('收盘价','N/A')}元 "
+                f"MA5={tech.get('MA5','N/A')} "
+                f"MA20={tech.get('MA20','N/A')} "
+                f"RSI={rsi}({rsi_status}) "
+                f"{trend}5日{ret:+.1f}%{ma_bull} "
+                f"{valuation}"
+            )
         except Exception as e:
             lines.append(f"  {code}: 异常-{str(e)[:30]}")
-    
-    # 财经新闻摘要
-    news = []
+    return lines
+
+
+def _news_lines() -> list:
+    """生成近期财经要闻段；数据缺失时留显式缺口说明。"""
     try:
         news = df.get_news_sentiment(days=2)
     except Exception:
         news = []
-    if news:
-        lines.append(f"\n近期财经要闻({len(news)}条):")
-        for n in news[:5]:
-            title = str(n.get("新闻标题", n.get("title", "")))[:60]
-            date = n.get("发布时间", n.get("date", ""))
-            lines.append(f"  [{date}] {title}")
-    else:
+    if not news:
         # get_news_sentiment 内部吞异常返回 []，静默缺席会让智能体自己编"政策利好"，
         # 所以这里必须留一行显式缺口说明（实测 akshare 1.18.94 的 stock_news_em 抛 ArrowInvalid）。
-        lines.append("\n(新闻数据暂不可用：不得引用新闻作为催化剂依据，需要时写\"无\")")
-    
+        return ["\n(新闻数据暂不可用：不得引用新闻作为催化剂依据，需要时写\"无\")"]
+    lines = [f"\n近期财经要闻({len(news)}条):"]
+    for n in news[:5]:
+        title = str(n.get("新闻标题", n.get("title", "")))[:60]
+        date = n.get("发布时间", n.get("date", ""))
+        lines.append(f"  [{date}] {title}")
+    return lines
+
+
+def prepare_market_data(n_stocks: int = 10, heat: dict = None, regime: dict = None) -> str:
+    """准备市场数据给LLM分析（优化：并行获取 + 精简数量）
+
+    heat/regime 可由调用方预先获取后传入，避免 run_daily_analysis
+    在保存报告阶段重复请求（get_market_heat 走 akshare 无缓存，
+    重复调一次多等数秒且可能失败）。
+    """
+    # 市场情绪
+    if heat is None:
+        heat = df.get_market_heat()
+    # 市场状态判断（牛熊市）
+    if regime is None:
+        regime = df.get_market_regime()
+    lines = _heat_and_regime_lines(heat, regime)
+
+    # 板块轮动
+    lines += _sector_lines()
+
+    # 当前持仓
+    lines += _portfolio_lines()
+
+    # 从候选股票池中抽样（精简到 10 只）
+    pool = df.get_index_components()["code"].tolist()[:n_stocks]
+
+    # 并行获取所有股票行情（优化点）
+    print(f"[并行] 正在获取 {len(pool)} 只股票行情...")
+    prices_map = df.get_batch_stock_prices(pool)
+    fund_map = df.get_fundamental_batch(pool)
+    lines += _candidate_lines(pool, prices_map, fund_map)
+
+    # 财经新闻摘要
+    lines += _news_lines()
+
     return "\n".join(lines)
+
 
 
 def run_backtest_for_picks(stock_codes: list) -> str:
@@ -549,4 +576,5 @@ if __name__ == "__main__":
     print(f"{'='*60}")
     print(result)
     print("\n[已保存] result_latest.md + history/")
+
 
