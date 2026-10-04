@@ -14,7 +14,6 @@ import requests
 import re
 import time
 from datetime import datetime
-from typing import Dict, List
 
 import portfolio_tracker as pt
 

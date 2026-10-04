@@ -3,8 +3,8 @@
 """
 import json
 import os
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from datetime import datetime
+from typing import Dict, List
 import data_fetcher as df
 
 

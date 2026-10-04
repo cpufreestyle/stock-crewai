@@ -6,7 +6,6 @@ Stock-CrewAI Claude Harness 健康监控
 并在需要时自动重启。
 """
 
-import os
 import sys
 import json
 import time

@@ -43,7 +43,7 @@ class _AkLazy:
 ak = _AkLazy()
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Tuple
 import time as _time
 import requests
 import json

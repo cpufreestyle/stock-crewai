@@ -1,7 +1,7 @@
 """
 风控模块 - 仓位计算和风险管理
 """
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 def kelly_criterion(win_rate: float, avg_win: float, avg_loss: float) -> float:

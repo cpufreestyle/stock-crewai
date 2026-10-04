@@ -1,6 +1,6 @@
 """交易信号去重 - 同一股票在冷却窗口内只执行一次交易"""
 import time
-from typing import Dict, Optional
+from typing import Dict
 
 from config import SCAN_INTERVAL_MINUTES
 

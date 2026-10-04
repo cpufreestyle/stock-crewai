@@ -3,7 +3,6 @@ CrewAI Tasks - 任务定义 v2.0
 新增市场状态和仓位管理提示
 """
 from crewai import Task
-from typing import Dict, Any, List
 
 
 def create_market_analysis_task(watcher_agent, market_data: str) -> Task:
