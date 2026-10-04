@@ -1208,3 +1208,51 @@ README 的测试数从 48 改成 56；目录树补 `data_sources/`；更新日�
 每个提交都单独跑：compileall 全仓、关键消费方 import（crew / circuit_breaker / run_virtual_v4 /
 web_dashboard / core.scheduler）、pytest tests/ -q 56 passed。
 
+
+
+## 二十一、补测试拆掉“不敢动”的借口，并修掉最后一处非原子写（2026-10-05）
+
+第十九节说 run_virtual_v4.py 因为零测试覆盖所以不拆。这一节就是去补那个覆盖。
+
+### 21.1 check_portfolio_risk 全覆盖（c2f0583 / 7766467）
+
+第一批 13 个用例覆盖固定止损 / 止盈 / 预警三条分支与边界：
+
+- 止损线恰好等于现价时触发、高于现价不触发；
+- stop_loss 未设置（0）时**永不触发**——不能把 0 当止损线，这是最容易亏钱的口子；
+- 行情缺失时依次回退 last_price -> avg_cost，不 KeyError；
+- 停牌（价格 0）跳过，不除零；
+- 同时命中止损与止盈时只出一条（elif 链）。
+
+第二批 5 个用例覆盖 ATR 动态止损，用 patch.object(rv, 'ti') mock 掉取数：
+
+- ATR 算出的动态止损更严时采用它；
+- **动态止损比固定止损宽时必须钳制回固定值**（核心资金保护，之前完全没测）；
+- K 线不足 14 根、持仓不足 3 天时放弃 ATR 退回固定止损；
+- mock 被调用/不被调用的断言，确认分支真的走进去了。
+
+### 21.2 MockTrader 只读路径（1a16afe）
+
+6 个用例：portfolio.json 缺失时给默认 10 万、
+缺 cash 键时默认 0 并正确算市值、缺 last_price 时用 avg_cost 兜底、
+空持仓返回 []。全部走 tmp_path，不碰真实持仓文件。
+
+### 21.3 修掉 trades_real.json 的非原子写（ede46a5）
+
+顺手扫了全仓 15 处 json.dump 直写。结论：
+
+- portfolio.json（portfolio_tracker.py:51）与 trades_YYYYMM.json（:201）**已经是原子的**，
+  且注释里记录了 9/26 的撕裂写事故与复现条件，这两处不用动；
+- trades_real.json（broker_trader.py:127）是剩下唯一一处交易日志裸写，
+  已改成与上面一致的 tmp + os.replace + 异常清理。实测连写两笔、
+  累计正确、无 .tmp 残留；
+- run_virtual_v4.py 的两处：运行日志是带时间戳的唯一文件名（撕裂无害），
+  净值历史是读-改-写但有 check_single_instance() 进程级单实例保护，
+  并发风险低。该文件按第十九节决定不做结构性改动，此处仅记录。
+
+### 21.4 数字
+
+测试数 56 -> 80（新增 24 个），全部通过。
+run_virtual_v4.py 从“零测试覆盖”变成撤价计算逻辑有 18 个用例守着，
+下次要拆它已经有安全网了。
+
