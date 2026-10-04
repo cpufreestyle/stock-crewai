@@ -1340,3 +1340,47 @@ dashboard 里手写了一份 _cache dict + 30s TTL，这是仓库里第三套缓
 测试数 107 -> 114。web_dashboard.py 现在有路由级覆盖，
 下一步要动它的 20 个 handler 已经有安全网了。
 
+
+
+## 二十四、第三份指标实现合并 + dashboard 撕裂写修复（2026-10-05）
+
+### 24.1 performance_auditor 的第三份指标实现（f128827）
+
+在翻 web_dashboard 时发现 agents/performance_auditor.py:_calculate_metrics 里
+还有**第三份**收益率/夏普/回撤实现（这次用 numpy）。前三轮已合并过两份
+（backtest.py 与 performance_report.py -> quant_metrics），这是漏网的。
+
+已收敛到 performance_metrics.compute_metrics，保留该 agent 自己的输出键
+（data_points 映射自 total_days），调用方无感。
+
+**注意一处有意的数值变化**：原实现用 np.std（总体标准差），
+共用实现用样本标准差（n-1）。实测 annual_volatility 会差约 2.8%
+（例：52.77 -> 54.22），sharpe 随之小幅变化；
+max_drawdown / annual_return / win_rate 三项完全一致。
+样本标准差对“一组样本收益率”才是统计正确的选择，所以朝这个方向统一；
+如果下游有硬编码阈值依赖旧值，需要按新值复核。
+
+### 24.2 修掉 dashboard 的撕裂写（c6b1917）
+
+api_dashboard 在 **GET 路径**上对 net_value_history.json 做读-改-写，
+用的是裸 open("w") + json.dump，无锁无原子替换。
+这是 HANDOVER 9.2 / 11.4 记录过的同款事故模式（portfolio.json 和
+trades_*.json 都踩过），而且 dashboard 天生并发：两个浏览器标签页
+同时开面板就会触发。
+
+已改为 safe_io.safe_save_json（持锁 + tmp + os.replace）。
+实测：写入读回一致、追加正常、无 .tmp / .lock 残留。
+
+另外确认 net_value_history.json 的写入方有三个：
+web_dashboard（2 处）、agents/performance_auditor（读）、
+run_virtual_v4（net_value 记录）。这个文件是共享的，
+后续再动它必须走 safe_io。
+
+### 24.3 数字
+
+测试数维持 114（本轮是重构与修 bug，未加用例；
+performance_metrics 的等价性在上两轮已用 6 组序列逐字段验证过）。
+
+全仓 json.dump 直写从 15 处降到 14 处，剩下的都判断过：
+带时间戳的唯一文件名（撕裂无害）或有单实例保护。
+
