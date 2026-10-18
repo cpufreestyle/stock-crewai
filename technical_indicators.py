@@ -60,59 +60,92 @@ def calculate_ma(prices: List[float], period: int) -> Optional[float]:
 
 
 def calculate_ema(prices: List[float], period: int) -> Optional[float]:
-    """计算指数移动平均线"""
-    if len(prices) < period:
-        return None
-    alpha = 2 / (period + 1)
-    ema = prices[0]
-    for p in prices[1:]:
-        ema = alpha * p + (1 - alpha) * ema
-    return ema
+    """计算指数移动平均线（通达信口径，取最后一个值）"""
+    series = calculate_ema_series(prices, period)
+    return series[-1] if series else None
+
+
+def calculate_sma_seed_series(values: List[float], n: int, m: int) -> List[float]:
+    """通达信 SMA(X,N,M) 口径：Y=(X*M+Y'*(N-M))/N，前 N 项均值做种子。
+
+    返回与输入等长的序列；长度不足 N 时返回空列表。
+    """
+    if len(values) < n or n <= 0:
+        return []
+    out: List[float] = []
+    prev = sum(values[:n]) / n
+    for x in values:
+        prev = (x * m + prev * (n - m)) / n
+        out.append(prev)
+    return out
+
+
+def calculate_ema_series(values: List[float], period: int) -> List[float]:
+    """通达信 EMA(X,N) 口径，等价于 SMA(X, N+1, 2)：Y=(X*2+Y'*(N-1))/(N+1)。
+
+    与前版差异：种子取前 N 项均值（而非首元素），使前 period-1 个值也有定义。
+    """
+    if period <= 0 or len(values) < period:
+        return []
+    return calculate_sma_seed_series(values, period + 1, 2)
 
 
 def calculate_macd(prices: List[float], fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """计算MACD指标"""
-    if len(prices) < slow:
+    """计算MACD指标（通达信口径，取最后一个交易日）"""
+    series = calculate_macd_series(prices, fast, slow, signal)
+    if not series:
         return None, None, None
-    
-    ema_fast = calculate_ema(prices, fast)
-    ema_slow = calculate_ema(prices, slow)
-    
-    if ema_fast is None or ema_slow is None:
-        return None, None, None
-    
-    dif = ema_fast - ema_slow
-    dea = calculate_ema([dif] * signal, signal)  # 简化估算
-    macd_hist = (dif - dea) * 2 if dea else 0
-    
-    return round(dif, 4), round(dea, 4), round(macd_hist, 4)
+    dif, dea, hist = series[-1]
+    return round(dif, 4), round(dea, 4), round(hist, 4)
+
+
+def calculate_macd_series(prices: List[float], fast: int = 12, slow: int = 26, signal: int = 9) -> List[Tuple[float, float, float]]:
+    """通达信 MACD 口径，逐日返回 (DIFF, DEA, MACD柱)。
+
+    公式原文：DIFF:=EMA(CLOSE,SHORT)-EMA(CLOSE,LONG); DEA:=EMA(DIFF,M); MACD:=2*(DIFF-DEA)
+    """
+    ema_fast = calculate_ema_series(prices, fast)
+    ema_slow = calculate_ema_series(prices, slow)
+    if not ema_fast or not ema_slow:
+        return []
+    n = min(len(ema_fast), len(ema_slow))
+    dif = [ema_fast[i] - ema_slow[i] for i in range(n)]
+    dea = calculate_ema_series(dif, signal)
+    if not dea:
+        return []
+    offset = len(dif) - len(dea)
+    out: List[Tuple[float, float, float]] = []
+    for i, d in enumerate(dea):
+        dif_v = dif[offset + i]
+        out.append((dif_v, d, 2 * (dif_v - d)))
+    return out
 
 
 def calculate_rsi(prices: List[float], period: int = 14) -> Optional[float]:
-    """计算RSI指标"""
+    """计算RSI指标（通达信 Wilder 平滑口径）"""
+    return calculate_rsi_wilder(prices, period)
+
+
+def calculate_rsi_wilder(prices: List[float], period: int = 14) -> Optional[float]:
+    """通达信 RSI 口径（Wilder 平滑）。
+
+    公式原文：LC:=REF(CLOSE,1);
+               WRSI:=SMA(MAX(CLOSE-LC,0),N,1)/SMA(ABS(CLOSE-LC),N,1)*100
+    与旧版差异：增益/损失用 SMA(N,1) 递推平滑，不是最后 N 项的算术平均。
+    """
     if len(prices) < period + 1:
         return None
-    
-    gains = []
-    losses = []
-    for i in range(1, len(prices)):
-        change = prices[i] - prices[i-1]
-        if change > 0:
-            gains.append(change)
-            losses.append(0)
-        else:
-            gains.append(0)
-            losses.append(abs(change))
-    
-    if len(gains) < period:
+    diffs = [prices[i] - prices[i - 1] for i in range(1, len(prices))]
+    gains = [d if d > 0 else 0.0 for d in diffs]
+    losses = [-d if d < 0 else 0.0 for d in diffs]
+    avg_gain_s = calculate_sma_seed_series(gains, period, 1)
+    avg_loss_s = calculate_sma_seed_series(losses, period, 1)
+    if not avg_gain_s or not avg_loss_s:
         return None
-    
-    avg_gain = sum(gains[-period:]) / period
-    avg_loss = sum(losses[-period:]) / period
-    
+    avg_gain = avg_gain_s[-1]
+    avg_loss = avg_loss_s[-1]
     if avg_loss == 0:
-        return 100
-    
+        return 100.0 if avg_gain > 0 else 50.0
     rs = avg_gain / avg_loss
     return round(100 - 100 / (1 + rs), 2)
 
@@ -133,32 +166,43 @@ def calculate_bollinger(prices: List[float], period: int = 20, std_dev: int = 2)
     return round(upper, 4), round(ma, 4), round(lower, 4)
 
 
-def calculate_kdj(highs: List[float], lows: List[float], closes: List[float], period: int = 9) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-    """计算KDJ指标"""
+def calculate_kdj_series(highs: List[float], lows: List[float], closes: List[float],
+                         period: int = 9, k_period: int = 3, d_period: int = 3
+                         ) -> List[Tuple[float, float, float]]:
+    """通达信 KDJ 口径，逐日返回 (K, D, J)。
+
+    公式原文：RSV:=(CLOSE-LLV(LOW,N))/(HHV(HIGH,N)-LLV(LOW,N))*100;
+               K:=SMA(RSV,M1,1); D:=SMA(K,M2,1); J:=3*K-2*D
+    与旧版差异：K/D 对全序列做 SMA(...,1) 递推，旧版只递推最后 3 个 RSV。
+    """
     if len(closes) < period:
-        return None, None, None
-    
-    rsvs = []
+        return []
+    rsvs: List[float] = []
     for i in range(period - 1, len(closes)):
-        low_min = min(lows[i-period+1:i+1])
-        high_max = max(highs[i-period+1:i+1])
-        if high_max == low_min:
-            rsvs.append(50)
+        window_low = min(lows[i - period + 1:i + 1])
+        window_high = max(highs[i - period + 1:i + 1])
+        if window_high == window_low:
+            rsvs.append(50.0)
         else:
-            rsv = (closes[i] - low_min) / (high_max - low_min) * 100
-            rsvs.append(rsv)
-    
-    if len(rsvs) < 3:
-        k_val = d_val = 50
-    else:
-        k_val = 50
-        d_val = 50
-        for rsv in rsvs[-3:]:
-            k_val = 2/3 * k_val + 1/3 * rsv
-            d_val = 2/3 * d_val + 1/3 * k_val
-    
-    j_val = 3 * k_val - 2 * d_val
-    
+            rsvs.append((closes[i] - window_low) / (window_high - window_low) * 100)
+    k_series = calculate_sma_seed_series(rsvs, k_period, 1)
+    d_series = calculate_sma_seed_series(k_series, d_period, 1)
+    if not k_series or not d_series:
+        return []
+    offset = len(k_series) - len(d_series)
+    out: List[Tuple[float, float, float]] = []
+    for i, d_val in enumerate(d_series):
+        k_val = k_series[offset + i]
+        out.append((k_val, d_val, 3 * k_val - 2 * d_val))
+    return out
+
+
+def calculate_kdj(highs: List[float], lows: List[float], closes: List[float], period: int = 9) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    """计算KDJ指标（通达信口径，取最后一个交易日）"""
+    series = calculate_kdj_series(highs, lows, closes, period)
+    if not series:
+        return None, None, None
+    k_val, d_val, j_val = series[-1]
     return round(k_val, 2), round(d_val, 2), round(j_val, 2)
 
 
@@ -180,7 +224,6 @@ def calculate_atr(highs: List[float], lows: List[float], closes: List[float], pe
         return None
     
     return round(sum(trs[-period:]) / period, 4)
-
 
 
 def _score_ma_trend(ma5, ma10, ma20, score, detail):
@@ -343,7 +386,6 @@ def analyze_stock(code: str) -> Dict:
         "signal_detail": signal_detail,
         "volume_ratio": round(recent_vol / avg_vol, 2) if avg_vol > 0 else 0
     }
-
 
 
 if __name__ == "__main__":
