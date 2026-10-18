@@ -3137,3 +3137,68 @@ error 早退、前 8 截断、缺 `代码` 跳过、`technical_analysis` 非 dic
   该文件由 git 跟踪且为手维护状态，本次拆分安全。
 - 该模块被 `data_fetcher.py` 与 `run_virtual_v4.py` 通过 `get_realtime_quotes` 使用，
   函数签名、默认参数 `_retry=2`、返回 list 结构均未改动。
+
+## 52. 反编译通达信/同花顺：主程序加壳无产出，TCalc.dll 内置公式定位到指标口径缺陷
+
+### 52.1 背景与目标
+
+用户要求「用反编译收费的项目来优化我们的项目」。本机装有同花顺、通达信、
+申万宏源（通达信内核）、国泰君安大智慧、东方财富等商业股票终端，
+目标是借鉴其指标算法口径，修正 `technical_indicators.py`。
+
+### 52.2 反编译实测结论（哪些有产出、哪些没有）
+
+| 目标 | 加壳情况 | rea 恢复函数数 | 结论 |
+|---|---|---|---|
+| 通达信 `tdxw.exe`（17.5MB） | VMProtect（`.vmp0`/`.vmp1`，packing score 10） | 3 个 / 182 指令 | **无产出**，汇编不可读 |
+| 同花顺 `hexin.exe`（16.9MB） | UPX（`UPX0`/`UPX1`，packing score 16） | 1 个 / 216 指令 | **无产出** |
+| 通达信 `TCalc.dll`（3.3MB，公式计算内核） | **未加壳**（packing score 0） | **488 个 / 33,792 指令** | **有产出**，见 52.3 |
+
+**可复用的判据**：商业终端的主 exe 基本都加壳，但**辅助算法 DLL 常常裸奔**。
+通达信的指标公式内核在 `TCalc.dll`，同类的还有 `TGear.dll`/`TControl.dll` 等。
+下次先扫 `dlls/` 子目录再扫主程序，能省掉整轮无效分析。
+
+另一个已排除的路径：`T0002/PriCS.dat`（779KB）是编译后的二进制参数表，
+不是公式文本；`funcs/*.sp` 是界面布局配置，也不是算法。
+内置指标公式以**中文字符串形式硬编码在 `TCalc.dll` 里**（GBK 编码），
+用 `[Text.Encoding]::GetEncoding(936).GetString()` 读 `TCalc.dll` 再定位
+`SMA(X,N,M)` 等函数名即可取出公式原文。
+
+### 52.3 拿到的口径依据（公式原文）
+
+```
+EMA(X,N):  Y=(X*2+Y'*(N-1))/(N+1)        等价 SMA(X,N+1,2)
+SSMA(X,N,M): Y=(X*M+Y'*(N-M))/N          前 N 项均值做种子
+MACD:  DIFF:=EMA(CLOSE,SHORT)-EMA(CLOSE,LONG); DEA:=EMA(DIFF,M); MACD:=2*(DIFF-DEA)
+RSI:   WRSI:=SMA(MAX(CLOSE-LC,0),N,1)/SMA(ABS(CLOSE-LC),N,1)*100   （Wilder 平滑）
+KDJ:   RSV:=(CLOSE-LLV(LOW,N))/(HHV(HIGH,N)-LLV(LOW,N))*100;
+       K:=SMA(RSV,M1,1); D:=SMA(K,M2,1); J:=3*K-2*D
+BOLL:  MID:=MA(CLOSE,N); UPPER:=MID+2*STD(CLOSE,N); LOWER:=MID-2*STD(CLOSE,N)
+```
+
+### 52.4 修正的三处缺陷（提交 31911b5，分支 `codex/tdx-indicator-alignment`）
+
+1. **`calculate_macd` 的 DEA 恒等于 DIF**：原实现 `dea = calculate_ema([dif]*signal, signal)`
+   是对 9 个相同值求 EMA，数学上必等于该值本身，于是 DEA 恒等于 DIF、MACD 柱恒为 0、
+   `_score_macd` 里 `macd_hist > 0` 的金叉分支**永不触发**。
+   实测同一条序列修正前 `(0.0002, 0.0002, -0.0)`、修正后 `(0.0002, 0.0027, -0.0049)`。
+   这是本次唯一的行为 bug，另两处是口径偏差。
+2. **`calculate_rsi` 用算术平均而非 Wilder 平滑**：同序列 53.23 变为 47.96。
+3. **`calculate_kdj` 的 K/D 只递推最后 3 个 RSV**：改为全序列递推。
+
+`calculate_bollinger` 原本就与通达信一致（`MA ± 2*STD`），未改动，仅加测试锁定。
+
+### 52.5 测试
+
+- 新增 `tests/test_technical_indicators_tdx.py`（25 例），内含按公式手工演算的
+  参考实现，与模块输出逐值比对，另覆盖数据不足 / 常数序列 / 单调涨跌 / 平盘 RSV 等边界。
+- `pytest tests/ -q`：**150 passed**（原 125 + 新 25），42.58s。
+- 测试解释器须用 Python 3.12（`C:\Users\qm081\AppData\Local\Programs\Python\Python312\python.exe`），
+  默认 `python` 是 3.14，缺 pandas，收集阶段就报错（见第六节）。
+
+### 52.6 未动的事项
+
+- 主程序（通达信/同花顺）的加壳汇编未做任何移植，恢复不出有效函数，无可移植物。
+- `rea/` 工作区、`D:\new_tdx\re-*.md` 等报告产物未提交，按需清理。
+- 反编译结论只取「公式口径」这一层，未提取任何二进制代码。
+
