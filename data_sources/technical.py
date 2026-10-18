@@ -59,6 +59,47 @@ def _wilder_series(series, n=14):
     return pd.Series(out_v, index=series.index[-len(out_v):])
 
 
+def _pin_shape(o, h, l, c):
+    """单根K线的插针形态：长影线 + 短实体（判定口径见 technical_indicators._bar_shape）。
+
+    两处指标实现必须给出一致的结论，否则同一根K线在日报里会出现两种说法
+    （52.7 节记过这个教训：MACD/RSI 曾经各写一份、口径漂移）。
+    """
+    span = h - l
+    if span <= 0:
+        return None
+    body = abs(c - o)
+    upper = h - max(o, c)
+    lower = min(o, c) - l
+    kind, shadow = ("upper", upper) if upper >= lower else ("lower", lower)
+    body_ratio = body / span
+    shadow_ratio = shadow / span
+    if body_ratio > 1.0 / 3.0 or shadow_ratio < 0.5:
+        return None
+    if body > 0 and shadow < body * 2:
+        return None
+    return kind
+
+
+def detect_pins(df: pd.DataFrame, lookback: int = 5) -> List[str]:
+    """最近 lookback 根K线里的插针方向，最新在前，形如 ["lower", "upper"]。
+
+    只做形状判定，不加 ATR 过滤：这里的调用方是日报文本，缺 ATR 上下文，
+    而形状判定已经足够保守（实体必须不足振幅三分之一）。
+    """
+    if df.empty or len(df) < 1:
+        return []
+    need = {"开盘", "最高", "最低", "收盘"}
+    if not need.issubset(df.columns):
+        return []
+    window = df.iloc[-lookback:] if lookback > 0 else df
+    pins = []
+    for _, row in window.iloc[::-1].iterrows():
+        kind = _pin_shape(row["开盘"], row["最高"], row["最低"], row["收盘"])
+        if kind:
+            pins.append(kind)
+    return pins
+
 def calculate_technical(df: pd.DataFrame) -> Dict:
     """计算技术指标（MA/RSI/MACD/布林带）"""
     if df.empty or len(df) < 20:
@@ -106,6 +147,10 @@ def calculate_technical(df: pd.DataFrame) -> Dict:
     bb_signal = "超买" if bb_pos > 80 else ("超卖" if bb_pos < 20 else "正常")
     
     # 近期涨跌
+    # 插针形态（长影线+短实体），与 technical_indicators 判定口径一致
+    pins = detect_pins(df)
+    pin_labels = {"lower": "长下影(偏多)", "upper": "长上影(偏空)"}
+    pin_text = "、".join(pin_labels[k] for k in dict.fromkeys(pins)) if pins else "无"
     recent_return = (closes.iloc[-1] / closes.iloc[-5] - 1) * 100 if len(closes) >= 5 else 0
     
     return {
@@ -121,5 +166,6 @@ def calculate_technical(df: pd.DataFrame) -> Dict:
         "布林带位置%": round(bb_pos, 1),
         "布林带信号": bb_signal,
         "5日涨跌%": round(recent_return, 2),
+        "插针": pin_text,
         "最新日期": df["日期"].iloc[-1] if "日期" in df.columns else None
     }
