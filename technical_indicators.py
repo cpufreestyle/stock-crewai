@@ -468,8 +468,7 @@ def analyze_stock(code: str) -> Dict:
         "score": score,
         "signal": signal,
         "signal_detail": signal_detail,
-        "volume_ratio": round(recent_vol / avg_vol, 2) if avg_vol > 0 else 0
-        ,
+        "volume_ratio": round(recent_vol / avg_vol, 2) if avg_vol > 0 else 0,
         "pins": pins,
     }
 
