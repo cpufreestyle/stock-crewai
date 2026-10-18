@@ -372,3 +372,51 @@ class TestAgentTradingGate:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+class TestPinReachesCandidateText:
+    u'''\u63d2\u9488\u5fc5\u987b\u8fdb\u5165\u7ed9\u7814\u7a76\u5458\u7684\u540e\u9009\u6587\u672c\uff0c\u800c\u4e0d\u662f\u53ea\u7b97\u51fa\u6765\u65e0\u4eba\u95f4\u3002
+
+    \u5b9e\u73b0\u63d2\u9488\u65f6\u5148\u6539\u4e86 data_sources/technical.py\uff08\u4ea7\u51fa\u5b57\u6bb5\uff09\uff0c\u4f46 crew.py \u7684
+    _candidate_lines \u53ea\u62ff MA/RSI/\u6da8\u8dcc\uff0c\u5b57\u6bb5\u8ba1\u7b97\u4e86\u5374\u6ca1\u8fdb\u6587\u672c\u2014\u2014
+    \u7814\u7a76\u5458\u6839\u672c\u770b\u4e0d\u89c1\u5b83\u3002\u8fd9\u6761\u7528\u4f8b\u9501\u4f4f\u90a3\u6761\u94fe\u3002
+    '''
+
+    def _tech(self, pin_text):
+        return {
+            chr(0x6536) + chr(0x76d8) + chr(0x4ef7): 10.5,
+            'MA5': 10.4, 'MA20': 10.2, 'RSI': 55,
+            '5' + chr(0x65e5) + chr(0x6da8) + chr(0x8dcc) + '%': 1.2,
+            chr(0x63d2) + chr(0x9488): pin_text,
+        }
+
+    def _lines(self, tech):
+        import pandas as pd
+        import crew
+        pool = ['000001']
+        frame = pd.DataFrame({'收盘': [10.0] * 30})
+        prices = {'000001': frame}
+        with patch.object(crew.df, 'calculate_technical', return_value=tech):
+            return crew._candidate_lines(pool, prices, {})
+
+    def test_pin_text_appears_in_candidate_line(self):
+        lines = self._lines(self._tech(chr(0x9576) + chr(0x5b50) + chr(0x7ebf)))
+        assert any(chr(0x63d2) + chr(0x9488) + '=' in l for l in lines), lines
+
+    def test_absent_pin_is_spelled_out(self):
+        u'''\u6ca1\u63d0\u5230\u63d2\u9488\u65f6\u4e5f\u8981\u5199\u201c\u65e0\u201d\uff0c\u5426\u5219\u6a21\u578b\u4f1a\u81ea\u5df1\u7f16\u4e00\u4e2a\u3002'''
+        lines = self._lines({})
+        assert any(chr(0x63d2) + chr(0x9488) + '=' + chr(0x65e0) in l for l in lines), lines
+
+    def test_calculate_technical_emits_the_field(self):
+        u'''\u4e0a\u6e38\u786c\u4ef6\uff1acalculate_technical \u7684\u8fd4\u56de\u91cc\u5fc5\u987b\u6709\u8fd9\u4e2a\u952e\u3002'''
+        import pandas as pd
+        from data_sources.technical import calculate_technical
+        n = 25
+        closes = [10.0 + (i % 5) * 0.01 for i in range(n)]
+        df = pd.DataFrame({
+            chr(0x65e5) + chr(0x671f): ['2026-03-%02d' % (i + 1) for i in range(n)],
+            chr(0x6536) + chr(0x76d8): closes,
+            chr(0x5f00) + chr(0x76d8): [c - 0.02 for c in closes],
+            chr(0x6700) + chr(0x9ad8): [c + 0.05 for c in closes],
+            chr(0x6700) + chr(0x4f4e): [c - 0.9 for c in closes],
+        })
+        assert chr(0x63d2) + chr(0x9488) in calculate_technical(df)

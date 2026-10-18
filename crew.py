@@ -120,6 +120,9 @@ def _candidate_lines(pool: list, prices_map: dict, fund_map: dict) -> list:
             else:
                 valuation = "估值=暂缺(勿凭印象编造)"
 
+            # 插针是异常形态，只有真的出现时才带上那一句；“无”也要写出来，
+            # 否则模型会把缺失当成“没提就是没有”而自己编一个。
+            pin_text = tech.get('插针', '无')
             lines.append(
                 f"  {code} {name}({sector}): "
                 f"现价={tech.get('收盘价','N/A')}元 "
@@ -128,6 +131,7 @@ def _candidate_lines(pool: list, prices_map: dict, fund_map: dict) -> list:
                 f"RSI={rsi}({rsi_status}) "
                 f"{trend}5日{ret:+.1f}%{ma_bull} "
                 f"{valuation}"
+                f"插针={pin_text} "
             )
         except Exception as e:
             lines.append(f"  {code}: 异常-{str(e)[:30]}")
