@@ -3202,3 +3202,29 @@ BOLL:  MID:=MA(CLOSE,N); UPPER:=MID+2*STD(CLOSE,N); LOWER:=MID-2*STD(CLOSE,N)
 - `rea/` 工作区、`D:\new_tdx\re-*.md` 等报告产物未提交，按需清理。
 - 反编译结论只取「公式口径」这一层，未提取任何二进制代码。
 
+
+### 52.7 第二处指标实现同步对齐（提交 e89cff6）
+
+调研时发现仓里有**两份独立的指标实现**，此前不知道彼此存在：
+
+| 模块 | 入口 | 调用方 |
+|---|---|---|
+| `technical_indicators.py` | `calculate_ma/ema/macd/rsi/kdj/bollinger` | `analyze_stock()` |
+| `data_sources/technical.py` | `calculate_technical(df)` | `crew.py:101`、`tools/stock_tools.py:66,129` |
+
+第二处是主流水线实际在用的路径（`crew.py` 研究员阶段），所以口径偏差会影响日报。
+它没有 52.4 第 1 条那个 DEA bug（对 `dif` 序列做了真实 `ewm`），但另有两处偏差：
+RSI 用 `rolling(14).mean()` 算术平均；MACD 的 EMA 用 `ewm(adjust=False)`，
+pandas 以**首元素**做种子，而通达信用前 N 项均值，序列前段有差异。
+
+新增 `_tdx_ema` / `_wilder_series` 两个 helper。
+`_wilder_series` 的种子取前 n 个**非 NaN** 值的均值：它的入参是 `closes.diff()`，
+首元素为 NaN，若直接 `sum(values[:n])` 会把 NaN 传播到整条序列，RSI 恒为 NaN
+（第一版就是这么写的，被测试当场抓住）。
+
+**教训**：指标口径这类横切关注点，改动时必须全仓搜同类实现，不能只改找到的那一个。
+
+测试 `tests/test_data_sources_technical_tdx.py`（21 例）含**交叉一致性断言**：
+同一输入下 `calculate_technical` 与 `technical_indicators` 的 MACD 三项、RSI 必须相等。
+这条断言是防止两份实现再次漂移的锁。全套 **171 passed**。
+
