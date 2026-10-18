@@ -389,6 +389,8 @@ def _score_pins(pins, score, detail):
         detail.append("长上影插针(-2)")
         score -= 2
     return score, detail
+
+
 def _score_volume(klines, score, detail):
     """成交量确认：最新量 > 20 日均量 1.5 倍时 +1"""
     recent_vol = klines[-1]["volume"] if klines else 0

@@ -100,6 +100,7 @@ def detect_pins(df: pd.DataFrame, lookback: int = 20) -> List[str]:
             pins.append(kind)
     return pins
 
+
 def calculate_technical(df: pd.DataFrame) -> Dict:
     """计算技术指标（MA/RSI/MACD/布林带）"""
     if df.empty or len(df) < 20:
