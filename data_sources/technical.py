@@ -81,7 +81,7 @@ def _pin_shape(o, h, l, c):
     return kind
 
 
-def detect_pins(df: pd.DataFrame, lookback: int = 5) -> List[str]:
+def detect_pins(df: pd.DataFrame, lookback: int = 20) -> List[str]:
     """最近 lookback 根K线里的插针方向，最新在前，形如 ["lower", "upper"]。
 
     只做形状判定，不加 ATR 过滤：这里的调用方是日报文本，缺 ATR 上下文，

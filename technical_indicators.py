@@ -348,11 +348,16 @@ def _bar_shape(o: float, h: float, l: float, c: float) -> Optional[Dict]:
     }
 
 
-def detect_pins(highs, lows, opens, closes, atr=None, lookback=5):
+def detect_pins(highs, lows, opens, closes, atr=None, lookback=20):
     """在最近 lookback 根K线里找插针，按时间倒序返回（最新在前）。
 
     atr 传入时只保留「影线长度 >= 0.8*ATR」的那些——小波动里的长影只是
     噪声，大波动里的长影才是真正的力量反转信号。
+
+    lookback 默认 20（约一个月交易日）而不是 5：真实行情上插针
+    平均约 34 根才出现一次（8 只股票 480 根日K得 14 个），5 根窗
+    口的命中率只有 14%，8 只全部落空。窗口太窄的话这个功能
+    等于永远不触发。
     """
     pins = []
     n = min(len(highs), len(lows), len(opens), len(closes))

@@ -210,3 +210,43 @@ class TestPinThresholdOnRealShapedData:
         assert len(ti.detect_pins(*bars, atr=1.0)) == 1
         # ATR 稍大就掉到阈值之下，确认它真的贴在边界上
         assert ti.detect_pins(*bars, atr=1.2) == []
+
+
+class TestPinDefaultLookback:
+    u"""默认 lookback 必须是 20：5 根窗口在真实行情上等于永不触发。"""
+
+    def test_default_lookback_is_twenty(self):
+        import inspect
+        sig = inspect.signature(ti.detect_pins)
+        assert sig.parameters['lookback'].default == 20, (
+            '默认 lookback 退回去了。真实行情上插针平均约 34 根才出现一次，'
+            '5 根窗口命中率仅 14%（8 只股票 480 根日K 实测全落空），'
+            '窗口太窄这个功能就等于永远不触发。')
+
+    def test_five_day_window_misses_real_market(self):
+        u"""钉住那条实测：5 根窗口在 60 根真实K线上抓不到插针。"""
+        # 60 根里只有零星几个插针（约 2.9%），且都不在最后 5 根
+        bars = self._bars()
+        assert ti.detect_pins(*bars, atr=1.0, lookback=5) == []
+        # 同一份数据放到 60 根窗口就能抓到
+        assert len(ti.detect_pins(*bars, atr=1.0, lookback=60)) >= 1
+
+    def _bars(self):
+        # 59 根普通K线 + 末尾 1 根长下影，模拟「插针不在最近 5 天」
+        highs, lows, opens, closes = [], [], [], []
+        for i in range(59):
+            o = 10.0 + (i % 3) * 0.01
+            opens.append(o)
+            closes.append(o + 0.02)
+            highs.append(o + 0.05)
+            lows.append(o - 0.03)
+        # 插针放在倒数第 30 根（上个月出现过），而不是最后一根
+        highs.append(10.1)
+        lows.append(9.7)
+        opens.append(10.0)
+        closes.append(10.05)
+        highs[-31] = 10.1
+        lows[-31] = 9.1    # 长下影
+        opens[-31] = 10.0
+        closes[-31] = 10.05
+        return highs, lows, opens, closes
