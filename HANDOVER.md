@@ -1,6 +1,6 @@
 # 交接文档：stock-crewai 七智能体端到端验证
 
-> 生成时间：2026-09-19；最后更新：2026-10-03 23:15
+> 生成时间：2026-09-19；最后更新：2026-10-18（第五十三节：插针形态识别）
 > 背景：项目用 CrewAI 七智能体做 A 股投资分析。**模型端点由 `.env` 的 `OPENAI_BASE_URL` + `MODEL_NAME` 决定
 > （`LLM_PROVIDER` 未设 → 走 `agents/llm.py` 的 OpenAI 兼容缺省分支），当前是本地 Ollama
 > `qwen3.8-gsq-rco-iq3s`（27B IQ3_S，`http://127.0.0.1:11434/v1`）**；
@@ -3227,4 +3227,54 @@ pandas 以**首元素**做种子，而通达信用前 N 项均值，序列前段
 测试 `tests/test_data_sources_technical_tdx.py`（21 例）含**交叉一致性断言**：
 同一输入下 `calculate_technical` 与 `technical_indicators` 的 MACD 三项、RSI 必须相等。
 这条断言是防止两份实现再次漂移的锁。全套 **171 passed**。
+
+
+## 53. 插针形态识别落地（2026-10-18，提交 826cecb / b30ed9c）
+
+用户要求「尝试实行插针」。插针 = 长影线 + 短实体的K线：价格被快速推到一端又被压回，
+说明另一侧有明确的力量在反向承接。
+
+### 53.1 判定口径
+
+全部用**占振幅的比例**，不用绝对价位——否则 3 元的股票和 300 元的股票会被同一套
+像素阈值判成两种结果。三个条件同时满足才算插针：
+
+- 实体占振幅 <= 1/3
+- 长影占振幅 >= 1/2
+- 长影 >= 2 倍实体（实体为 0 的十字星豁免，倍数无意义）
+
+方向取 `upper`（长上影，射击星一侧，偏空）/ `lower`（长下影，锤子线一侧，偏多），
+取上下影中更长的那一侧。
+
+### 53.2 落到的两处（52.7 的横切教训）
+
+| 模块 | 入口 | 说明 |
+|---|---|---|
+| `technical_indicators.py` | `_bar_shape` / `detect_pins` / `_score_pins` | 接入 `analyze_stock` 评分：长下影 +2 / 长上影 -2，**同向只记一次**（多根同向插针不重复加分），结果新增 `pins` 字段 |
+| `data_sources/technical.py` | `_pin_shape` / `detect_pins` | `crew.py` 研究员阶段实际在用的路径，`calculate_technical` 输出新增「插针」字段，形如「长下影(偏多)、长上影(偏空)」 |
+
+两处阈值完全一致，并有**交叉一致性测试锁**（`TestPinAlignmentWithTechnicalIndicators`）：
+同一组K线下两个实现必须给出相同的方向集合。这是 52.7 那条教训的复用——
+MACD/RSI 曾经各写一份然后漂移，插针一开始就上锁。
+
+### 53.3 ATR 过滤只加在一处
+
+`technical_indicators.detect_pins` 接受 `atr` 参数，影线 < 0.8*ATR 的当噪声砍掉。
+`data_sources/technical.detect_pins` **故意不加**：它的调用方是日报文本，没有 ATR 上下文，
+而形状判定已经足够保守（实体必须不足振幅三分之一）。两处因此不是逐字节等价，
+交叉一致性测试比的是**方向集合**，不比值。
+
+### 53.4 测试
+
+- `tests/test_technical_indicators_pins.py`：20 例。经典锤子线/射击星、十字星长下影、
+  一字板、实体过大、影线不足 2 倍实体、影线占比不足 50%、lookback 边界、ATR 过滤、
+  评分同向去重。
+- `tests/test_data_sources_technical_tdx.py`：新增 6 例交叉一致性 + 键集合。
+- 全套 **197 passed**（原 171 + 20 + 6）。
+
+### 53.5 顺带修的仓库卫生
+
+`.gitignore` 补三条：`rea/`（1.5GB 反编译工作区，是独立仓库
+`github.com/cpufreestyle/rea`，不该随本仓库同步）、`_sw_*.py` / `_scan_out.txt` /
+`_baseline_result.md`（死代码扫描的临时脚本与输出）。
 
