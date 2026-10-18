@@ -303,6 +303,87 @@ def _score_kdj(k_val, d_val, score, detail):
     return score, detail
 
 
+def _bar_shape(o: float, h: float, l: float, c: float) -> Optional[Dict]:
+    """单根K线的插针形态判定：长影线 + 短实体。
+
+    插针（锤子线 / 射击之星一类）的信息量在「影线远长于实体」：盘中价格被
+    快速推到一端又被压回，说明另一侧有明确的力量在反向承接。判定全部用占
+    振幅的比例，不用绝对价位——否则 3 元的股票和 300 元的股票会被同一套
+    像素阈值判成两种结果。
+
+    返回 None 表示不是插针；否则返回：
+      kind: "lower"（长下影，锤子线一侧，偏多）或 "upper"（长上影，偏空）
+      body: 实体占振幅比例
+      shadow: 长影占振幅比例
+      wick_ratio: 长影 / 实体
+    实体不足振幅 1/3、长影占振幅过半、长影>=实体2倍才算插针。
+    """
+    span = h - l
+    if span <= 0:
+        return None
+    body = abs(c - o)
+    upper = h - max(o, c)
+    lower = min(o, c) - l
+    if upper >= lower:
+        kind, shadow = "upper", upper
+    else:
+        kind, shadow = "lower", lower
+    body_ratio = body / span
+    shadow_ratio = shadow / span
+    if body_ratio > 1.0 / 3.0:
+        return None
+    if shadow_ratio < 0.5:
+        return None
+    if body <= 0:
+        wick_ratio = None
+    elif shadow < body * 2:
+        return None
+    else:
+        wick_ratio = shadow / body
+    return {
+        "kind": kind,
+        "body": round(body_ratio, 4),
+        "shadow": round(shadow_ratio, 4),
+        "wick_ratio": round(wick_ratio, 4) if wick_ratio is not None else None,
+    }
+
+
+def detect_pins(highs, lows, opens, closes, atr=None, lookback=5):
+    """在最近 lookback 根K线里找插针，按时间倒序返回（最新在前）。
+
+    atr 传入时只保留「影线长度 >= 0.8*ATR」的那些——小波动里的长影只是
+    噪声，大波动里的长影才是真正的力量反转信号。
+    """
+    pins = []
+    n = min(len(highs), len(lows), len(opens), len(closes))
+    start = max(0, n - lookback)
+    for i in range(n - 1, start - 1, -1):
+        shape = _bar_shape(opens[i], highs[i], lows[i], closes[i])
+        if shape is None:
+            continue
+        if atr and atr > 0:
+            shadow_len = (highs[i] - max(opens[i], closes[i])
+                          if shape["kind"] == "upper"
+                          else min(opens[i], closes[i]) - lows[i])
+            if shadow_len < 0.8 * atr:
+                continue
+        shape["index"] = i
+        pins.append(shape)
+    return pins
+
+
+def _score_pins(pins, score, detail):
+    """插针信号：长下影 +2 / 长上影 -2，同一方向只记一次。"""
+    if not pins:
+        return score, detail
+    kinds = {p["kind"] for p in pins}
+    if "lower" in kinds:
+        detail.append("长下影插针(+2)")
+        score += 2
+    if "upper" in kinds:
+        detail.append("长上影插针(-2)")
+        score -= 2
+    return score, detail
 def _score_volume(klines, score, detail):
     """成交量确认：最新量 > 20 日均量 1.5 倍时 +1"""
     recent_vol = klines[-1]["volume"] if klines else 0
@@ -334,6 +415,7 @@ def analyze_stock(code: str) -> Dict:
         return {"code": code, "error": "数据不足", "signal": "NEUTRAL"}
 
     closes = [k["close"] for k in klines]
+    opens = [k["open"] for k in klines]
     highs = [k["high"] for k in klines]
     lows = [k["low"] for k in klines]
 
@@ -360,6 +442,8 @@ def analyze_stock(code: str) -> Dict:
     score, signal_detail = _score_bollinger(current, upper, middle, lower, score, signal_detail)
     score, signal_detail = _score_kdj(k_val, d_val, score, signal_detail)
     score, signal_detail, recent_vol, avg_vol = _score_volume(klines, score, signal_detail)
+    pins = detect_pins(highs, lows, opens, closes, atr=atr)
+    score, signal_detail = _score_pins(pins, score, signal_detail)
 
     signal = _judge_signal(score)
 
@@ -385,6 +469,8 @@ def analyze_stock(code: str) -> Dict:
         "signal": signal,
         "signal_detail": signal_detail,
         "volume_ratio": round(recent_vol / avg_vol, 2) if avg_vol > 0 else 0
+        ,
+        "pins": pins,
     }
 
 

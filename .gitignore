@@ -100,3 +100,11 @@ portfolio.pre-*.json
 
 # DBVS 工具残留
 .dbvs*
+
+# rea 反编译工作区：独立仓库(github.com/cpufreestyle/rea)，不随本仓库同步
+rea/
+
+# 死代码扫描的临时脚本与输出
+_sw_*.py
+_scan_out.txt
+_baseline_result.md
