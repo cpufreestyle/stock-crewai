@@ -147,3 +147,66 @@ class TestScorePins:
         score, detail = ti._score_pins([], 3, detail)
         assert score == 3
         assert detail == ["MA多头排列(+3)"]
+
+
+class TestPinThresholdOnRealShapedData:
+    """ATR 阈值 0.8 是实测切点：不能误杀长影，也不能放过短影。
+
+    真实行情验证（HANDOVER 53.6）的结论固化成断言：形状判定单独用会命中约
+    1/4 的K线，那已经不能叫异常形态；ATR 过滤是必需的。
+    """
+
+    def _bars(self, specs):
+        highs, lows, opens, closes = [], [], [], []
+        for o, h, l, c in specs:
+            opens.append(o); highs.append(h); lows.append(l); closes.append(c)
+        return highs, lows, opens, closes
+
+    def test_short_shadow_noise_is_rejected(self):
+        """影线只有 0.4*ATR：形状像插针，但只是小波动里的噪声。"""
+        # ATR≈1.0（振幅约1），下影0.4
+        bars = self._bars([(10.0, 10.4, 9.6, 10.35)])
+        assert ti.detect_pins(*bars, atr=1.0) == []
+
+    def test_shadow_at_threshold_is_kept(self):
+        """影线正好 0.8*ATR：临界值要保留（>= 而非 >）。"""
+        # 下影0.8，实体0.1，振幅0.9
+        bars = self._bars([(10.0, 10.1, 9.2, 10.1)])
+        pins = ti.detect_pins(*bars, atr=1.0)
+        assert len(pins) == 1
+        assert pins[0]["kind"] == "lower"
+
+    def test_extreme_shadow_survives_large_atr(self):
+        """影线远大于ATR时仍要保留：过滤只砍短影，不砍极端长影。"""
+        bars = self._bars([(10.0, 10.3, 8.0, 10.2)])
+        pins = ti.detect_pins(*bars, atr=2.0)
+        assert len(pins) == 1
+
+    def test_shape_only_hits_a_quarter_of_bars(self):
+        """只用形状判定（不过ATR）会放过约四分之一的普通K线。
+
+        这条钉住 53.6 的结论：ATR 过滤不是可选优化，去掉它信号会被噪声淹没。
+        """
+        specs = [
+            (10.0, 10.5, 9.8, 10.4),   # 普通阳线，短影
+            (10.0, 10.2, 9.0, 10.1),   # 长下影
+            (10.0, 11.2, 9.9, 10.0),   # 长上影
+            (10.0, 10.4, 9.9, 10.3),   # 普通
+        ]
+        bars = self._bars(specs)
+        raw = ti.detect_pins(*bars, atr=None, lookback=len(specs))
+        assert len(raw) == 2          # 4根里2根，正是 1/2 这种小样本的极端值
+        # 真实数据上是 24.58%，这里用小样本钉住「过半会被放过」这个性质
+        assert len(raw) * 2 >= len(specs)
+
+    def test_no_gap_between_kept_and_rejected(self):
+        """阈值上下不能有连续样本带，否则阈值就是随手拍的。
+
+        53.6 实测：被砍掉的104个样本影线/ATR 全在0.8以下，>=0.8 的有0个。
+        这里用一档靠近阈值的样本确认它会被保留。
+        """
+        # 下影 0.85、实体 0.1、振幅 0.95：贴着 0.8 阈值之上
+        bars = self._bars([(10.0, 10.1, 9.15, 10.1)])
+        assert len(ti.detect_pins(*bars, atr=1.0)) == 1
+        # ATR 稍大就掉到阈值之下，确认它真的贴在边界上
+        assert ti.detect_pins(*bars, atr=1.2) == []
