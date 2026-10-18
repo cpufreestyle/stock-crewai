@@ -223,3 +223,82 @@ class TestOutputKeysIncludePin:
             "布林带位置%", "布林带信号", "5日涨跌%", "最新日期", "插针",
         }
         assert set(out.keys()) == expected
+
+
+class TestDetectPinsAtFilter:
+    u"""data_sources.detect_pins 必须带 ATR 过滤，否则日报里每只股票都既看多又看空。"""
+
+    def _df(self, shadow=0.9, atr_scale=1.0):
+        # 25 根普通K线 + 1 根长下影；影线长度随 atr_scale 变
+        n = 25
+        closes = [10.0 + (i % 5) * 0.01 for i in range(n)]
+        return pd.DataFrame({
+            '日期': ['2026-03-%02d' % (i + 1) for i in range(n)],
+            '开盘': [c - 0.02 for c in closes],
+            '收盘': closes,
+            '最高': [c + 0.05 for c in closes],
+            '最低': [c - 0.03 for c in closes],
+        })
+
+    def test_short_shadow_is_filtered_out(self):
+        from data_sources.technical import detect_pins
+        # 构造影线远小于 ATR 的一根：形状像插针但只是小波动
+        n = 25
+        closes = [10.0] * n
+        df = pd.DataFrame({
+            '日期': ['2026-03-%02d' % (i + 1) for i in range(n)],
+            '开盘': closes, '收盘': closes,
+            '最高': [10.05] * n, '最低': [9.95] * n,
+        })
+        # 全部 25 根形状相同（下影0.05、实体0、振幅0.1），ATR=0.1
+        # 0.05 < 0.8*0.1=0.08，应全部被过滤
+        assert detect_pins(df) == []
+
+    def test_long_shadow_survives(self):
+        from data_sources.technical import detect_pins
+        n = 25
+        closes = [10.0] * n
+        df = pd.DataFrame({
+            '日期': ['2026-03-%02d' % (i + 1) for i in range(n)],
+            '开盘': closes, '收盘': closes,
+            '最高': [10.05] * n, '最低': [9.0] * n,
+        })
+        # 下影1.0、ATR1.05，1.0 >= 0.8*1.05，保留
+        pins = detect_pins(df)
+        assert 'lower' in pins
+
+    def test_atr_helper_matches_indicators_module(self):
+        from data_sources.technical import _atr
+        import technical_indicators as ti
+        n = 40
+        closes = [10.0 + (i % 7) * 0.03 for i in range(n)]
+        highs = [c + 0.08 for c in closes]
+        lows = [c - 0.06 for c in closes]
+        df = pd.DataFrame({
+            '日期': ['2026-03-%02d' % (i + 1) for i in range(n)],
+            '开盘': [c - 0.01 for c in closes],
+            '收盘': closes, '最高': highs, '最低': lows,
+        })
+        assert _atr(df) == pytest.approx(ti.calculate_atr(highs, lows, closes), rel=1e-4)
+
+    def test_both_implementations_agree_on_real_data(self):
+        u"""同一份真实K线，两处实现必须给出相同的方向集合。"""
+        import technical_indicators as ti
+        from data_sources.technical import detect_pins
+        kl = ti.get_history_kline('600519', days=120)
+        if not kl:
+            return   # 无网络时跳过，不算失败
+        df = pd.DataFrame({
+            '日期': [k['date'] for k in kl],
+            '开盘': [k['open'] for k in kl],
+            '收盘': [k['close'] for k in kl],
+            '最高': [k['high'] for k in kl],
+            '最低': [k['low'] for k in kl],
+        })
+        atr = ti.calculate_atr([k['high'] for k in kl],
+                               [k['low'] for k in kl],
+                               [k['close'] for k in kl])
+        ref = ti.detect_pins([k['high'] for k in kl], [k['low'] for k in kl],
+                             [k['open'] for k in kl], [k['close'] for k in kl],
+                             atr=atr, lookback=20)
+        assert set(detect_pins(df)) == {p['kind'] for p in ref}
