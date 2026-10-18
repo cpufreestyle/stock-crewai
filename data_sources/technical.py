@@ -23,6 +23,42 @@ from ._common import (
 )
 
 
+def _tdx_ema(series, n):
+    """通达信 EMA(X,N) 口径，等价 SMA(X, N+1, 2)。
+
+    递推式 Y=(X*2+Y'*(N-1))/(N+1)，前 N+1 项均值做种子。
+    pandas 的 ewm(adjust=False) 以首元素做种子，两者在序列前段有差异。
+    """
+    values = list(series)
+    if len(values) < n:
+        return pd.Series([float("nan")] * len(values), index=series.index)
+    span = n + 1
+    prev = sum(values[:span]) / span
+    out_v = []
+    for x in values:
+        prev = (x * 2 + prev * (n - 1)) / (n + 1)
+        out_v.append(prev)
+    return pd.Series(out_v, index=series.index)
+
+
+def _wilder_series(series, n=14):
+    """TDX Wilder smoothing, equivalent to SMA(X, N, 1): Y=(X+Y'*(N-1))/N.
+
+    The seed is the mean of the first n non-NaN values, so this is safe to use on
+    the output of closes.diff() whose first element is NaN. The trailing value is
+    NaN when there are fewer than n usable values.
+    """
+    values = [v for v in series if pd.notna(v)]
+    if len(values) < n:
+        return pd.Series([float('nan')] * len(series), index=series.index)
+    prev = sum(values[:n]) / n
+    out_v = []
+    for x in values:
+        prev = (x + prev * (n - 1)) / n
+        out_v.append(prev)
+    return pd.Series(out_v, index=series.index[-len(out_v):])
+
+
 def calculate_technical(df: pd.DataFrame) -> Dict:
     """计算技术指标（MA/RSI/MACD/布林带）"""
     if df.empty or len(df) < 20:
@@ -35,18 +71,24 @@ def calculate_technical(df: pd.DataFrame) -> Dict:
     ma20 = closes.rolling(20).mean().iloc[-1]
     ma60 = closes.rolling(60).mean().iloc[-1] if len(closes) >= 60 else None
     
-    # RSI(14)
+    # RSI(14)：通达信口径 Wilder 平滑（SMA(...,N,1)），非算术平均
+    # 公式：WRSI:=SMA(MAX(CLOSE-LC,0),N,1)/SMA(ABS(CLOSE-LC),N,1)*100
     delta = closes.diff()
-    gain = delta.clip(lower=0).rolling(14).mean().iloc[-1]
-    loss = (-delta.clip(upper=0)).rolling(14).mean().iloc[-1]
-    rs = gain / loss if loss != 0 else 100
-    rsi = 100 - (100 / (1 + rs))
+    gain = delta.clip(lower=0)
+    loss = (-delta.clip(upper=0))
+    avg_gain = _wilder_series(gain).iloc[-1]
+    avg_loss = _wilder_series(loss).iloc[-1]
+    if avg_loss == 0:
+        rsi = 100.0 if avg_gain > 0 else 50.0
+    else:
+        rsi = 100 - (100 / (1 + avg_gain / avg_loss))
     
-    # MACD(12,26,9)
-    ema12 = closes.ewm(span=12, adjust=False).mean()
-    ema26 = closes.ewm(span=26, adjust=False).mean()
+    # MACD(12,26,9)：通达信口径，EMA 以前 N 项均值做种子
+    # 公式：DIFF:=EMA(CLOSE,12)-EMA(CLOSE,26); DEA:=EMA(DIFF,9); MACD:=2*(DIFF-DEA)
+    ema12 = _tdx_ema(closes, 12)
+    ema26 = _tdx_ema(closes, 26)
     dif = ema12 - ema26
-    dea = dif.ewm(span=9, adjust=False).mean()
+    dea = _tdx_ema(dif, 9)
     macd = (dif - dea) * 2
     
     macd_hist = macd.iloc[-1]
